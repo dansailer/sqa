@@ -1,0 +1,16 @@
+name: Feature request
+description: Suggest a new command, flag or agent workflow
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do that sqa does not support today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: How should it work? Keep in mind the hard rules (no MCP, no token handling, user-approved triage).
