@@ -46,3 +46,11 @@ downloads another official release from SonarSource and uses it instead.
 
 The corresponding source code is published by SonarSource at the repository
 and tag above.
+
+## Not included: `sonar-secrets`
+
+`sonar` can install a separate secrets scanner, `sonar-secrets`, which
+SonarSource distributes under its own commercial licence. It is **not bundled**
+with `sqa`, and `sqa` never downloads it: `sqa` runs `sonar` with its own
+`SONAR_USER_HOME` and never runs the commands that install it (`sonar
+integrate`, `sonar analyze secrets`, the git hooks).
