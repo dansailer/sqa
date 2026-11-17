@@ -37,15 +37,10 @@ jobs:
         run: go test -race ./...
 
   build:
-    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    name: Build linux/amd64 (bundled sonar)
     needs: test
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    strategy:
-      fail-fast: true
-      matrix:
-        goos: [linux, darwin]
-        goarch: [amd64, arm64]
+    timeout-minutes: 20
     steps:
       - name: Harden runner
         uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
@@ -63,30 +58,39 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # Always a fresh download for releases (no cache), verified against the
+      # SHA-256 compiled into sqa.
+      - name: Fetch and verify sonar
+        run: make fetch-sonar
+
+      - name: Test embedded sonar
+        run: go test -tags bundled_sonar ./internal/sonarcli/
+
       - name: Build and package
         env:
-          CGO_ENABLED: "0"
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           version="${TAG#v}"
-          name="sqa_${version}_${GOOS}_${GOARCH}"
-          mkdir -p "build/${name}" dist
-          go build -trimpath \
-            -ldflags "-s -w -X github.com/dansailer/sqa/internal/cli.version=${TAG} -X github.com/dansailer/sqa/internal/cli.commit=${GITHUB_SHA}" \
-            -o "build/${name}/sqa" ./cmd/sqa
-          cp LICENSE README.md "build/${name}/"
+          name="sqa_${version}_linux_amd64"
+          make build-bundled VERSION="${TAG}" COMMIT="${GITHUB_SHA}"
+          mkdir -p "build/${name}/licenses" dist
+          mv sqa "build/${name}/sqa"
+          cp LICENSE README.md THIRD_PARTY_NOTICES.md "build/${name}/"
+          cp licenses/sonarqube-cli-LGPL-3.0.txt licenses/sonarqube-cli-GPL-3.0.txt "build/${name}/licenses/"
+          # Smoke test: the bundled sonar extracts, verifies and runs.
+          home="$(mktemp -d)"
+          HOME="${home}" "build/${name}/sqa" version
+          HOME="${home}" "build/${name}/sqa" setup
           mtime="$(git log -1 --format=%cI)"
           tar --sort=name --owner=0 --group=0 --numeric-owner --mtime="${mtime}" \
             -C build -czf "dist/${name}.tar.gz" "${name}"
-          ls -l dist
+          ls -l "build/${name}/sqa" dist
 
       - name: Upload archive
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: sqa-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: sqa-linux-amd64
           path: dist/*.tar.gz
           if-no-files-found: error
           retention-days: 1

@@ -1,0 +1,102 @@
+name: sonar CLI update check
+
+# Weekly check whether SonarSource published a newer stable sonar CLI than the
+# one bundled into sqa. Opens an issue; never commits binaries or code.
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sonar-update
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Check for a newer sonar CLI
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # stable.version is what SonarSource's own install.sh reads to resolve
+      # the latest release.
+      - name: Compare pinned and latest version
+        id: check
+        env:
+          BASE_URL: https://binaries.sonarsource.com/Distribution/sonarqube-cli
+        run: |
+          set -euo pipefail
+          re='^[0-9]+(\.[0-9]+){1,3}$'
+          pinned="$(sed -nE 's/^const PinnedVersion = "([^"]+)"$/\1/p' internal/sonarcli/install.go)"
+          latest="$(curl -fsSL --proto '=https' --max-time 30 "${BASE_URL}/stable.version" | tr -d '[:space:]')"
+          [[ "${pinned}" =~ $re ]] || { echo "::error::cannot parse PinnedVersion (${pinned})"; exit 1; }
+          [[ "${latest}" =~ $re ]] || { echo "::error::unexpected stable.version content"; exit 1; }
+          echo "pinned=${pinned} latest=${latest}"
+          newest="$(printf '%s\n%s\n' "${pinned}" "${latest}" | sort -V | tail -n 1)"
+          if [[ "${latest}" == "${pinned}" || "${newest}" != "${latest}" ]]; then
+            echo "sonar ${pinned} is current." >> "$GITHUB_STEP_SUMMARY"
+            echo "update=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          url="${BASE_URL}/${latest}/linux/sonarqube-cli-${latest}-linux-x86-64.bin"
+          sha="$(curl -fsSL --proto '=https' --max-time 30 "${url}.sha256" | awk '{print tolower($1)}')"
+          [[ "${sha}" =~ ^[0-9a-f]{64}$ ]] || sha="(could not read ${url}.sha256)"
+          {
+            echo "update=true"
+            echo "pinned=${pinned}"
+            echo "latest=${latest}"
+            echo "url=${url}"
+            echo "sha=${sha}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Open issue
+        if: steps.check.outputs.update == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PINNED: ${{ steps.check.outputs.pinned }}
+          LATEST: ${{ steps.check.outputs.latest }}
+          URL: ${{ steps.check.outputs.url }}
+          SHA: ${{ steps.check.outputs.sha }}
+        run: |
+          set -euo pipefail
+          title="Bundled sonar CLI update available: ${LATEST}"
+          existing="$(gh issue list --state open --search "\"${title}\" in:title" --json number --jq 'length')"
+          if [[ "${existing}" != "0" ]]; then
+            echo "An open issue for ${LATEST} already exists."
+            exit 0
+          fi
+          body="$(cat <<MD
+          SonarSource published sonar CLI **${LATEST}** (sqa bundles **${PINNED}**).
+
+          - Binary (linux/amd64): ${URL}
+          - Published checksum: ${URL}.sha256
+          - SHA-256 (as published): \`${SHA}\`
+          - Release notes / source: https://github.com/SonarSource/sonarqube-cli/releases
+
+          To update, after reviewing the upstream changes:
+
+          1. Set \`PinnedVersion\` and the \`pinnedChecksums\` entries in \`internal/sonarcli/install.go\` (verify each digest independently against the \`.sha256\` files).
+          2. Update version, URL and SHA-256 in \`THIRD_PARTY_NOTICES.md\` (a test enforces this).
+          3. \`make fetch-sonar test-bundled build-bundled\`, then test \`sqa doctor\` against the SonarQube server.
+
+          Opened automatically by the sonar-update workflow. No code or binaries were changed.
+          MD
+          )"
+          gh issue create --title "${title}" --body "${body}"
