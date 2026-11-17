@@ -27,29 +27,18 @@ there is nothing else to install and `sqa setup` is optional.
 
 ### With mise (recommended)
 
-[mise](https://mise.jdx.dev) installs `sqa` straight from the GitHub releases
-and verifies the download (GitHub asset digest or `checksums.txt`, plus the
-build provenance attestation):
+[mise](https://mise.jdx.dev) installs `sqa` straight from the GitHub releases,
+verifies the download against `checksums.txt`, and installs the skill:
 
 ```sh
-mise use -g github:dansailer/sqa
-sqa skill install    # ~/.agents/skills/sqa/SKILL.md
+mise use -g --postinstall "sqa skill install" github:dansailer/sqa
 sqa auth login       # you, once, in a terminal (browser login, token goes to the OS keychain)
 ```
 
-To have mise refresh the skill automatically on every install and upgrade,
-add a `postinstall` hook to the tool entry in your global config
-(`~/.config/mise/config.toml`):
-
-```toml
-[tools."github:dansailer/sqa"]
-version = "latest"
-postinstall = '"$MISE_TOOL_INSTALL_PATH/sqa" skill install'
-```
-
-Then run `mise install`. Add `&& "$MISE_TOOL_INSTALL_PATH/sqa" skill install --target claude`
-if you also use Claude Code. Upgrades with `mise upgrade github:dansailer/sqa`
-rerun the hook, so the installed skill always matches the binary.
+mise saves the hook in `~/.config/mise/config.toml`, so `mise upgrade` reinstalls
+the skill with every new version. Use
+`--postinstall "sqa skill install && sqa skill install --target claude"` if you
+also use Claude Code.
 
 > While the repository is private, mise needs a GitHub token to see the
 > releases: `export GITHUB_TOKEN=$(gh auth token)` (or `MISE_GITHUB_TOKEN`).
@@ -61,11 +50,10 @@ Download the archive from the
 `sqa` on your `PATH`:
 
 ```sh
-VERSION=0.1.0
+VERSION=0.1.1
 curl -fsSLO "https://github.com/dansailer/sqa/releases/download/v${VERSION}/sqa_${VERSION}_linux_amd64.tar.gz"
 curl -fsSLO "https://github.com/dansailer/sqa/releases/download/v${VERSION}/checksums.txt"
 sha256sum --ignore-missing -c checksums.txt
-gh attestation verify "sqa_${VERSION}_linux_amd64.tar.gz" --repo dansailer/sqa   # build provenance
 tar -xzf "sqa_${VERSION}_linux_amd64.tar.gz"
 install -m 0755 "sqa_${VERSION}_linux_amd64/sqa" ~/.local/bin/sqa
 ```
@@ -221,8 +209,8 @@ skills:
   the checksum is fetched from SonarSource's published `.sha256` file.
 - `sqa` refuses to run `sonar integrate` (installs MCP servers and hooks) and
   `sonar remediate`.
-- Release archives come with `checksums.txt`, an SPDX SBOM and GitHub build
-  provenance attestations. Workflows use SHA-pinned actions, least-privilege
+- Release archives come with `checksums.txt`, an SPDX SBOM, plus GitHub build
+  provenance attestations once the repository is public. Workflows use SHA-pinned actions, least-privilege
   tokens and `step-security/harden-runner`.
 
 ## Development
