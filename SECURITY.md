@@ -6,8 +6,12 @@ Only the latest released version of `sqa` receives security fixes.
 
 ## Reporting a vulnerability
 
-Please **do not** open a public issue for security problems.
-Report them privately to the maintainer via a GitHub direct contact or email listed on the maintainer's profile ([@dansailer](https://github.com/dansailer)), including:
+Please **do not** open a public issue, discussion or pull request for security problems.
+
+Report them privately through GitHub's private vulnerability reporting: open the
+repository's **Security** tab and click **Report a vulnerability**
+(https://github.com/dansailer/sqa/security/advisories/new). Only the maintainers
+can see the report. Please include:
 
 - a description of the issue and its impact,
 - steps to reproduce or a proof of concept,
@@ -27,3 +31,5 @@ You will get an acknowledgement within 5 working days. Fixes are released as a n
 - No MCP servers are installed or used.
 - State-changing commands require explicit `--approved-by-user` and a comment, and are logged to a local audit file.
 - Release archives ship with `checksums.txt`, an SPDX SBOM and GitHub build provenance attestations (`gh attestation verify <archive> --repo dansailer/sqa`).
+
+Vulnerabilities in the bundled `sonar` CLI itself belong to SonarSource; see https://github.com/SonarSource/sonarqube-cli/security. If you are unsure which project an issue belongs to, report it here and we will forward the relevant part.
