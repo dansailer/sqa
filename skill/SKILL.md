@@ -115,13 +115,20 @@ never edit Sonar settings or exclusions without explicit approval.
 
 ## Fix loop
 
-1. Pick the highest-ranked finding the user approved for fixing. Check out the
-   default branch and pull it (`git pull --ff-only`), then branch from it
-   (e.g. `sonar/<rule>-<key>`, lowercased and sanitized);
-   never stack on a previous fix branch. One finding per branch/PR unless the user
-   explicitly approved grouping those findings. Ask before creating the branch,
-   pushing or opening the PR (a visible write), unless the fix approval already
-   included that.
+1. Pick the highest-ranked finding the user approved for fixing. Before
+   creating a branch, check the forge for an already-open PR/MR on that
+   finding: the key is in the body's SonarQube URL, the PR has the `sonar`
+   label, and the head is typically `sonar/<rule>-<key>`. Example:
+   `gh pr list --state open --label sonar --search "<key> in:body"`. If `gh`
+   is not available: `git ls-remote --heads origin 'sonar/*<key>*'`. If one
+   exists, tell the user (with the PR link), do not open another, and ask
+   how to proceed. `sqa` has no skip or defer command; only run `sqa next`
+   after the user agrees. Otherwise check out the default branch and pull
+   it (`git pull --ff-only`), then branch from it (e.g. `sonar/<rule>-<key>`,
+   lowercased and sanitized); never stack on a previous fix branch. One
+   finding per branch/PR unless the user explicitly approved grouping those
+   findings. Ask before creating the branch, pushing or opening the PR (a
+   visible write), unless the fix approval already included that.
 2. Use the brief from `sqa next` (or `sqa show <key>`) and the surrounding code;
    make the smallest correct fix. Do not suppress the rule with comments or
    annotations unless the user explicitly approved that. Commit only that fix
