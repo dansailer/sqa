@@ -16,8 +16,7 @@ decision**.
 
 ## Install
 
-Release binaries are currently built for **Linux amd64 only**. macOS and
-arm64 builds are temporarily not provided (see [From source](#from-source)).
+Release binaries are currently built for **Linux amd64 only**.
 
 Each release binary contains the official SonarSource `sonar` CLI
 (`1.12.0.17622`, unmodified, LGPL-3.0, see
@@ -42,41 +41,6 @@ also use Claude Code.
 
 > While the repository is private, mise needs a GitHub token to see the
 > releases: `export GITHUB_TOKEN=$(gh auth token)` (or `MISE_GITHUB_TOKEN`).
-
-### Release binary
-
-Download the archive from the
-[releases page](https://github.com/dansailer/sqa/releases), verify it, and put
-`sqa` on your `PATH`:
-
-```sh
-VERSION=0.1.1
-curl -fsSLO "https://github.com/dansailer/sqa/releases/download/v${VERSION}/sqa_${VERSION}_linux_amd64.tar.gz"
-curl -fsSLO "https://github.com/dansailer/sqa/releases/download/v${VERSION}/checksums.txt"
-sha256sum --ignore-missing -c checksums.txt
-tar -xzf "sqa_${VERSION}_linux_amd64.tar.gz"
-install -m 0755 "sqa_${VERSION}_linux_amd64/sqa" ~/.local/bin/sqa
-```
-
-The archive contains `sqa`, `LICENSE`, `README.md`, `THIRD_PARTY_NOTICES.md`
-and `licenses/` (LGPL-3.0 and GPL-3.0 texts for the bundled `sonar`). The
-binary is about 116 MB because of the bundled `sonar`; the archive is about
-54 MB.
-
-### From source
-
-```sh
-go install github.com/dansailer/sqa/cmd/sqa@latest
-sqa setup   # downloads the pinned sonar (Linux x86-64/arm64, macOS arm64)
-```
-
-A plain `go install` build does not bundle `sonar`. `sqa setup` downloads the
-pinned release from SonarSource's official distribution
-(`https://binaries.sonarsource.com/Distribution/sonarqube-cli/`), verifies its
-SHA-256 against the checksum compiled into `sqa`, and installs it to
-`~/.local/share/sqa/bin/sonar`. On Intel Macs, for which SonarSource publishes
-no build, install `sonar` another way and set `sonar.path`. To build the
-bundled Linux amd64 binary yourself: `make build-bundled`.
 
 ### Which `sonar` is used
 
