@@ -1,7 +1,8 @@
 // Package sonarcli invokes the official SonarSource `sonar` CLI. Every request
 // sqa makes to SonarQube goes through this package, so sqa itself never sees,
-// stores or prints an authentication token: `sonar` resolves credentials from
-// the OS keychain (`sonar auth login`) or from SONARQUBE_CLI_* env vars.
+// reads, stores or prints an authentication token: `sonar` resolves
+// credentials from SONARQUBE_CLI_* env vars or from its token store (by
+// default a 0600 file that sqa points it at, see Environment).
 package sonarcli
 
 import (
@@ -59,6 +60,9 @@ type Runner struct {
 	// Dir is the working directory (empty = current directory). sonar uses it
 	// for project auto-detection.
 	Dir string
+	// Env, when set, is applied to sonar's environment: token store, sonar
+	// home, and the permission checks around each run.
+	Env *Environment
 }
 
 // forbidden lists sonar subcommands sqa refuses to run under any
@@ -84,22 +88,48 @@ func commandName(args []string) string {
 	return strings.Join(args[:n], " ")
 }
 
-// Run executes sonar with args and captures stdout and stderr. The child
-// inherits sqa's environment so SONARQUBE_CLI_* variables keep working;
-// sqa never inspects them.
-func (r *Runner) Run(ctx context.Context, args ...string) (stdout, stderr []byte, err error) {
+// command builds the exec.Cmd and prepares the token store. The child
+// inherits sqa's environment so SONARQUBE_CLI_* variables keep working; sqa
+// never inspects their values.
+func (r *Runner) command(ctx context.Context, args []string) (*exec.Cmd, error) {
 	if err := checkAllowed(args); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	cmd := exec.CommandContext(ctx, r.Bin, args...) //nolint:gosec // bin is the configured sonar CLI
 	cmd.Dir = r.Dir
+	if r.Env != nil {
+		if err := r.Env.Prepare(); err != nil {
+			return nil, err
+		}
+		cmd.Env = r.Env.Env(os.Environ())
+	}
+	return cmd, nil
+}
+
+// secure re-applies 0600 to the credentials file after sonar ran. Its error
+// is only reported when sonar itself succeeded.
+func (r *Runner) secure() error {
+	if r.Env == nil {
+		return nil
+	}
+	_, err := r.Env.Secure()
+	return err
+}
+
+// Run executes sonar with args and captures stdout and stderr.
+func (r *Runner) Run(ctx context.Context, args ...string) (stdout, stderr []byte, err error) {
+	cmd, err := r.command(ctx, args)
+	if err != nil {
+		return nil, nil, err
+	}
 	cmd.Stdin = nil
 	var out, errb bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
 	runErr := cmd.Run()
+	secErr := r.secure()
 	if runErr == nil {
-		return out.Bytes(), errb.Bytes(), nil
+		return out.Bytes(), errb.Bytes(), secErr
 	}
 	e := &Error{Command: commandName(args), Stderr: errb.String(), Err: runErr, ExitCode: -1}
 	var exitErr *exec.ExitError
@@ -118,26 +148,28 @@ func (r *Runner) Run(ctx context.Context, args ...string) (stdout, stderr []byte
 // Interactive runs sonar attached to the user's terminal (used for the
 // `sqa auth` pass-throughs, where sonar may prompt or open a browser).
 func (r *Runner) Interactive(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, args ...string) error {
-	if err := checkAllowed(args); err != nil {
+	cmd, err := r.command(ctx, args)
+	if err != nil {
 		return err
 	}
-	cmd := exec.CommandContext(ctx, r.Bin, args...) //nolint:gosec // bin is the configured sonar CLI
-	cmd.Dir = r.Dir
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
-	if err := cmd.Run(); err != nil {
+	runErr := cmd.Run()
+	secErr := r.secure()
+	if err := runErr; err != nil {
 		e := &Error{Command: commandName(args), Err: err, ExitCode: -1}
 		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
+		switch {
+		case errors.As(err, &exitErr):
 			e.ExitCode = exitErr.ExitCode()
 			if e.ExitCode == 2 {
 				e.Kind = KindUsage
 			}
-		} else {
+		default:
 			e.Kind = KindNotFound
 		}
 		return e
 	}
-	return nil
+	return secErr
 }
 
 // Source names where the sonar binary came from.
