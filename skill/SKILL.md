@@ -129,9 +129,10 @@ never edit Sonar settings or exclusions without explicit approval.
    `<type>(<scope>): <summary>`, usually `fix` (security or bugs), `refactor`/`style`
    for maintainability smells, or `test` if only tests change; include the rule key,
    e.g. `fix(security): use parameterized query in getUser (go:S3649)`. PR body:
-   finding key and its SonarQube URL (from `sqa next`/`show`), rule, location,
-   short why, what changed, tests run. Apply the `sonar` label; if it is
-   missing, ask before creating it, or tell the user.
+   `[<message> (<rule> · <rule name>)](<SonarQube URL from sqa next/show>)`,
+   location, short why, what changed, tests run — not the raw finding key.
+   Apply the `sonar` label; if it is missing, ask before creating it, or tell
+   the user.
 3. Run the project's tests and linters. Show the user the change, then open the PR
    with the harness's normal git/forge tooling. Never merge it yourself.
 4. SonarQube only updates after a new analysis (CI or the user's usual scan). After
