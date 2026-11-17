@@ -506,7 +506,7 @@ func TestSkillInstallAndPrint(t *testing.T) {
 	if !strings.HasPrefix(string(b), "---\nname: sqa\ndescription: ") {
 		t.Fatalf("frontmatter: %.80s", b)
 	}
-	for _, must := range []string{"No MCP", "sonar integrate", "--approved-by-user", "Stop and ask the user explicitly", "Never mark a finding as false positive or accepted to reduce the count"} {
+	for _, must := range []string{"No MCP", "sonar integrate", "sonar api", "--approved-by-user", "Stop and ask the user explicitly", "Never mark a finding as false positive or accepted to reduce the count"} {
 		if !strings.Contains(string(b), must) {
 			t.Errorf("SKILL.md missing %q", must)
 		}

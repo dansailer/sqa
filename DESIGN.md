@@ -197,7 +197,7 @@ CLI-side guardrails:
 Frontmatter: `name: sqa`, `description: …`. Content:
 
 - What `sqa` is; prerequisite: `sqa doctor` must pass; the user (not the agent) runs `sqa auth login`.
-- **Hard rules**: never use, install or configure a SonarQube MCP server; never run `sonar integrate`; never run `sonar auth login` (the user does that); never set, read or print tokens; always ask the user before any triage decision.
+- **Hard rules**: never use, install or configure a SonarQube MCP server; never run `sonar integrate` or `sonar api`; never run `sonar auth login` (the user does that); never set, read or print tokens; always ask the user before any triage decision.
 - Triage order (§7) and how to read `next` / `findings` / `show` output.
 - The fix loop: pick approved finding → fix → run tests → (re-scan via CI or `sonar` analysis if available) → re-check with `sqa show <key>`.
 - How to present a recommendation and ask for approval (template), and that approval covers only the presented findings.
@@ -217,12 +217,14 @@ sqa/
 │   ├── approval/    # guardrails + audit log
 │   └── output/      # toon/json/md/table renderers
 ├── skill/SKILL.md   # embedded via go:embed
+├── install.sh       # curl | sh installer (checksum-verified, linux/amd64)
 ├── tools/fetch-sonar/ # download + verify the pinned sonar for bundling
 ├── licenses/        # LGPL-3.0 / GPL-3.0 texts for the bundled sonar
 ├── THIRD_PARTY_NOTICES.md
-├── mise.toml        # pinned Go + golangci-lint, tasks (build, test, lint, fetch-sonar, build-bundled, …)
+├── mise.toml        # pinned Go, golangci-lint, shellcheck; tasks (build, test, lint, lint-sh, …)
 ├── mise.lock        # resolved tool versions + checksums
 ├── testdata/fake/   # fake `sonar` script + recorded API responses
+├── testdata/install/  # install.sh tests and a fake GitHub Releases API
 ├── .github/         # CI, CodeQL, release, sonar-update workflows, dependabot
 └── DESIGN.md
 ```
@@ -231,8 +233,8 @@ Libraries: `cobra` (commands), `gopkg.in/yaml.v3`, `golang.org/x/term`; no HTTP 
 
 ## 10a. Build, CI and release
 
-- **Tools and tasks**: `mise.toml` pins Go and golangci-lint (`mise.lock` records versions, download URLs and checksums) and defines the tasks (`build`, `build-bundled`, `fetch-sonar`, `sonar-version`, `test`, `test-bundled`, `lint`, `vulncheck`, `clean`). Every workflow sets up tools with `jdx/mise-action` (pinned mise version, binary verified against mise's signed checksums, `mise install --locked`, tool installs cached) and runs the same `mise run …` tasks as a developer. Go module and build caches (`~/go/pkg/mod`, `~/.cache/go-build`, plus `~/.cache/golangci-lint` for lint) are kept with `actions/cache` under one key per OS, `go.sum` and `mise.lock`, so a run saves them once and later runs restore them.
-- **CI** (`.github/workflows/ci.yml`, push/PR to `main`) is a single job so setup runs once; each check after the first runs even if an earlier one failed (`if: !cancelled()`): `mise run lint` (`go vet` + golangci-lint), `mise run test` with coverage, an untagged linux/amd64 `mise run build`, then the bundled steps: restore the `sonar` binary from `actions/cache` (key: pinned version from `mise run sonar-version`), `mise run test-bundled` (runs `fetch-sonar` first, which downloads on a miss and re-verifies the SHA-256 either way; then `go vet` and `go test -race` with `-tags bundled_sonar`, including a test that the embedded bytes match the pinned checksum and that the extracted `sonar --version` runs), `mise run build-bundled`, smoke test (`sqa version`, `sqa setup`, `sqa doctor` must fail only on auth). `mise run vulncheck` (govulncheck).
+- **Tools and tasks**: `mise.toml` pins Go, golangci-lint and shellcheck (`mise.lock` records versions, download URLs and checksums) and defines the tasks (`build`, `build-bundled`, `fetch-sonar`, `sonar-version`, `test`, `test-install`, `test-bundled`, `lint`, `lint-sh`, `vulncheck`, `clean`). Every workflow sets up tools with `jdx/mise-action` (pinned mise version, binary verified against mise's signed checksums, `mise install --locked`, tool installs cached) and runs the same `mise run …` tasks as a developer. Go module and build caches (`~/go/pkg/mod`, `~/.cache/go-build`, plus `~/.cache/golangci-lint` for lint) are kept with `actions/cache` under one key per OS, `go.sum` and `mise.lock`, so a run saves them once and later runs restore them.
+- **CI** (`.github/workflows/ci.yml`, push/PR to `main`) is a single job so setup runs once; each check after the first runs even if an earlier one failed (`if: !cancelled()`): `mise run lint` (`go vet` + golangci-lint + shellcheck), `mise run test` with coverage, `mise run test-install`, an untagged linux/amd64 `mise run build`, then the bundled steps: restore the `sonar` binary from `actions/cache` (key: pinned version from `mise run sonar-version`), `mise run test-bundled` (runs `fetch-sonar` first, which downloads on a miss and re-verifies the SHA-256 either way; then `go vet` and `go test -race` with `-tags bundled_sonar`, including a test that the embedded bytes match the pinned checksum and that the extracted `sonar --version` runs), `mise run build-bundled`, smoke test (`sqa version`, `sqa setup`, `sqa doctor` must fail only on auth). `mise run vulncheck` (govulncheck).
 - **CodeQL** (`codeql.yml`): Go, on push/PR and weekly; Go comes from mise, manual build mode with `go build ./...`.
 - **Release** (`release.yml`, on tag `v*`): `mise run test`, then one linux/amd64 job: fresh `mise run fetch-sonar` (no sonar cache), embedded-binary test, `mise run build-bundled` with `VERSION=<tag> COMMIT=<sha>` (`CGO_ENABLED=0`, `-trimpath`, `-ldflags "-s -w -X …/internal/cli.version=<tag> -X …/internal/cli.commit=<sha>"`, `-tags bundled_sonar`), smoke test, and packaging of `sqa_<version>_linux_amd64.tar.gz` (single root dir: `sqa`, `LICENSE`, `README.md`, `THIRD_PARTY_NOTICES.md`, `licenses/`; reproducible tar flags). A final job generates an SPDX SBOM, writes `checksums.txt` (`sha256sum`), creates build provenance attestations (`actions/attest-build-provenance`, skipped while the repo is private) for the archive and checksums, and publishes with `gh release create --generate-notes`. The asset name contains `linux` and `amd64`, which is what mise's `github:` backend matches. No goreleaser.
 - **sonar update check** (`sonar-update.yml`): weekly + manual, `contents: read` at the top, `issues: write` only on its single job; opens an issue when `stable.version` is newer than the pinned version (see §4.1).

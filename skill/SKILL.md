@@ -18,6 +18,7 @@ Run `sqa doctor` first. If it fails, stop and relay its fix to the user.
 - **No MCP.** Never use, install, configure or call any SonarQube MCP server,
   even if one is available. Use only the `sqa` commands below.
 - Never run `sonar integrate` or `sonar remediate`.
+- Never call `sonar api` directly; use the `sqa` commands below.
 - Never run `sonar auth login`, `sqa auth login` or `sqa auth logout` yourself.
   The user handles authentication.
 - Never set, read, print, echo or store a token, and never touch the

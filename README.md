@@ -16,20 +16,37 @@ decision**.
 - Ships a harness-neutral `SKILL.md` that teaches agents the triage order and the
   human-in-the-loop rule.
 
+## Why sqa and not just `sonar`?
+
+`sonar` 1.12 can technically do all of this via `sonar list issues` and
+`sonar api` (hotspots, rules, source, transitions). `sqa` exists because:
+
+- **`sonar list issues` does not include security hotspots.** `sqa findings` /
+  `sqa next` merge open issues and to-review hotspots into one list, ranked
+  security first.
+- **One call, not four or five.** `sqa next` and `sqa show` assemble the brief
+  an agent needs (rule description, code context, taint flow, fix guidance)
+  instead of raw API JSON, saving tokens and turns.
+- **A guardrail on writes.** State changes go only through `sqa mark` and
+  `sqa hotspot` with `--approved-by-user`. The skill forbids raw `sonar api`
+  calls; giving an agent `sonar api` would let it POST anything.
+- **One download.** Releases bundle a pinned, checksum-verified `sonar`, use a
+  file token store (no libsecret/keychain on Linux), give `sonar` its own home
+  so `sonar-secrets` is never downloaded, and turn telemetry off by default.
+  `sqa doctor` checks the setup; `sqa skill install` teaches the agent.
+
 ## Install
 
-Release binaries are currently built for **Linux amd64 only**.
-
-Each release binary contains the official SonarSource `sonar` CLI
-(`1.12.0.17622`, unmodified, LGPL-3.0, see
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)). On first use `sqa` extracts
-it to `~/.local/share/sqa/bin/sonar-<version>` and checks its SHA-256, so
-there is nothing else to install and `sqa setup` is optional.
+Release binaries are currently built for **Linux amd64 only**. Each release
+contains the official SonarSource `sonar` CLI (`1.12.0.17622`, unmodified,
+LGPL-3.0, see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)). On first use
+`sqa` extracts it to `~/.local/share/sqa/bin/sonar-<version>` and checks its
+SHA-256.
 
 ### With mise (recommended)
 
-[mise](https://mise.jdx.dev) installs `sqa` straight from the GitHub releases,
-verifies the download against `checksums.txt`, and installs the skill:
+[mise](https://mise.jdx.dev) installs `sqa` from GitHub releases, verifies
+`checksums.txt`, and can install the skill:
 
 ```sh
 mise use -g --postinstall "sqa skill install" github:dansailer/sqa
@@ -41,8 +58,19 @@ the skill with every new version. Use
 `--postinstall "sqa skill install && sqa skill install --target claude"` if you
 also use Claude Code.
 
-> While the repository is private, mise needs a GitHub token to see the
-> releases: `export GITHUB_TOKEN=$(gh auth token)` (or `MISE_GITHUB_TOKEN`).
+### With curl | sh
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/dansailer/sqa/main/install.sh | sh
+# pin a release:  ... | sh -s -- --version v0.2.0
+```
+
+Installs to `$SQA_INSTALL_DIR` (default `~/.local/bin`), verifies the archive
+against `checksums.txt`, and runs `sqa skill install` (skip with `--no-skill`).
+
+While the repository is private, both methods need a GitHub token to see the
+releases: `export GITHUB_TOKEN=$(gh auth token)` (or an authenticated `gh`;
+mise also accepts `MISE_GITHUB_TOKEN`).
 
 ### Which `sonar` is used
 
