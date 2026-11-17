@@ -51,7 +51,7 @@ harness (Grok / OpenCode / Claude / …)
 
 - `sqa` pins a tested `sonar` version: **1.12.0.17622** (`sonarcli.PinnedVersion`), with the SHA-256 SonarSource publishes for each platform binary **compiled into `sqa`** (`pinnedChecksums`).
 - Official source (the same as SonarSource's own `install.sh`): `https://binaries.sonarsource.com/Distribution/sonarqube-cli/<version>/<os>/sonarqube-cli-<version>-<platform>.bin`, checksum at `<binary>.sha256`. The GitHub releases of `SonarSource/sonarqube-cli` carry no binary assets.
-- **Release builds embed it.** `make fetch-sonar` (`tools/fetch-sonar`, reusing `sonarcli.Installer`) downloads the linux-x86-64 binary to `internal/sonarcli/bundled/sonar-linux-amd64` (gitignored, never committed) and verifies it against the compiled-in checksum. `make build-bundled` builds with `-tags bundled_sonar`, which compiles `bundled_on.go` (`//go:embed bundled/sonar-linux-amd64`). The tag is only valid for linux/amd64: on any other target `bundled_unsupported.go` breaks the build on purpose. Without the tag (`go install`, plain `go build`), nothing is embedded and `sqa` behaves as before.
+- **Release builds embed it.** `mise run fetch-sonar` (`tools/fetch-sonar`, reusing `sonarcli.Installer`) downloads the linux-x86-64 binary to `internal/sonarcli/bundled/sonar-linux-amd64` (gitignored, never committed) and verifies it against the compiled-in checksum. `mise run build-bundled` builds with `-tags bundled_sonar`, which compiles `bundled_on.go` (`//go:embed bundled/sonar-linux-amd64`). The tag is only valid for linux/amd64: on any other target `bundled_unsupported.go` breaks the build on purpose. Without the tag (`go install`, plain `go build`), nothing is embedded and `sqa` behaves as before.
 - **Extraction.** The OS can only exec a file, so on first use `sqa` writes the embedded bytes to `~/.local/share/sqa/bin/sonar-<version>` (`XDG_DATA_HOME` honoured): hash the embedded bytes, write to a temp file in the same directory, fsync, hash the written file, `chmod 0755`, atomic rename. A stamp file `sonar-<version>.verified` records digest, size and mtime; later runs only stat the file and compare (cheap), and re-hash when size or mtime changed, re-extracting on mismatch. Binaries left by other versions (`sonar-<other>`) are removed. The versioned file name means an upgrade never overwrites a binary another `sqa` process is running.
 - **Resolution order:** `sonar.path` from config → bundled (extracted) → `sqa setup` download (`~/.local/share/sqa/bin/sonar`) → `sonar` on `PATH`. Setting `sonar.version` in config to a version other than the bundled one skips the bundle.
 - **`sqa setup`** is optional with a bundled build: it performs (or with `--force` redoes) the extraction, runs `sonar --version` and reports. `sqa setup --sonar-version <v>` with another version downloads that official release (pinned checksum, or the published `.sha256` for other versions) to `~/.local/share/sqa/bin/sonar`, as for non-bundled builds. SonarSource publishes downloads for linux-x86-64, linux-arm64 and macos-arm64 (no macOS x86-64).
@@ -206,7 +206,8 @@ sqa/
 ├── tools/fetch-sonar/ # download + verify the pinned sonar for bundling
 ├── licenses/        # LGPL-3.0 / GPL-3.0 texts for the bundled sonar
 ├── THIRD_PARTY_NOTICES.md
-├── Makefile         # fetch-sonar, build-bundled, test-bundled, lint
+├── mise.toml        # pinned Go + golangci-lint, tasks (build, test, lint, fetch-sonar, build-bundled, …)
+├── mise.lock        # resolved tool versions + checksums
 ├── testdata/fake/   # fake `sonar` script + recorded API responses
 ├── .github/         # CI, CodeQL, release, sonar-update workflows, dependabot
 └── DESIGN.md

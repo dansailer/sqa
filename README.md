@@ -162,7 +162,7 @@ skills:
 
 - Tokens are handled only by `sonar`, which stores them in the OS keychain or
   reads `SONARQUBE_CLI_*` env vars. `sqa` never reads, logs or prints them.
-- The bundled `sonar` is verified three times: at build time (`make
+- The bundled `sonar` is verified three times: at build time (`mise run
   fetch-sonar` checks the download against the SHA-256 compiled into `sqa`),
   before extraction (the embedded bytes), and after writing it to disk. Later
   runs re-hash it whenever its size or modification time changes, and replace
@@ -179,12 +179,19 @@ skills:
 
 ## Development
 
+Tools and tasks are managed with [mise](https://mise.jdx.dev): `mise.toml`
+pins Go and golangci-lint (`mise.lock` records their checksums), and CI runs
+the same tasks.
+
 ```sh
-make test            # go test -race ./...
-make lint            # go vet + golangci-lint
-make fetch-sonar     # download + verify the pinned sonar (linux/amd64)
-make test-bundled    # tests with -tags bundled_sonar
-make build-bundled   # ./sqa with sonar embedded
+mise install                # Go + golangci-lint at the pinned versions
+mise tasks                  # list tasks
+mise run test               # go test -race ./...
+mise run lint               # go vet + golangci-lint
+mise run vulncheck          # govulncheck
+mise run fetch-sonar        # download + verify the pinned sonar (linux/amd64)
+mise run test-bundled       # vet + tests with -tags bundled_sonar
+mise run build-bundled      # ./sqa with sonar embedded (VERSION=… COMMIT=… optional)
 ```
 
 Tests run against a fake `sonar` script and recorded SonarQube responses in

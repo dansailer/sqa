@@ -5,7 +5,7 @@ package sonarcli
 import _ "embed"
 
 // bundledData is the official sonar binary for linux/amd64, fetched and
-// checksum-verified by `make fetch-sonar` before the build. It is not
+// checksum-verified by `mise run fetch-sonar` before the build. It is not
 // committed to git.
 //
 //go:embed bundled/sonar-linux-amd64

@@ -94,7 +94,7 @@ jobs:
 
           1. Set \`PinnedVersion\` and the \`pinnedChecksums\` entries in \`internal/sonarcli/install.go\` (verify each digest independently against the \`.sha256\` files).
           2. Update version, URL and SHA-256 in \`THIRD_PARTY_NOTICES.md\` (a test enforces this).
-          3. \`make fetch-sonar test-bundled build-bundled\`, then test \`sqa doctor\` against the SonarQube server.
+          3. \`mise run test-bundled\` and \`mise run build-bundled\`, then test \`sqa doctor\` against the SonarQube server.
 
           Opened automatically by the sonar-update workflow. No code or binaries were changed.
           MD
