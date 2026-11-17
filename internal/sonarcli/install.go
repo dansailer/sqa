@@ -26,9 +26,10 @@ const PinnedVersion = "1.12.0.17622"
 // binary (<binary>.sha256) for PinnedVersion. Embedding them means a
 // compromised download host cannot serve a matching binary + checksum pair.
 var pinnedChecksums = map[string]string{
-	"linux-x86-64": "c692e64dad89ea9e2388ec338dad47fa8703954e1c0ca8af111bc43e34afaa99",
-	"linux-arm64":  "258cb106e50721f6e58ba0e0bccd1c88cdc1bfe6b394871dc6640dc43ca12fea",
-	"macos-arm64":  "b64ce7175fb6cd63b277e6981052285fc4bb0437d98144ca754c054d66972838",
+	"linux-x86-64":   "c692e64dad89ea9e2388ec338dad47fa8703954e1c0ca8af111bc43e34afaa99",
+	"linux-arm64":    "258cb106e50721f6e58ba0e0bccd1c88cdc1bfe6b394871dc6640dc43ca12fea",
+	"macos-arm64":    "b64ce7175fb6cd63b277e6981052285fc4bb0437d98144ca754c054d66972838",
+	"windows-x86-64": "52dc02877bfc25bd436f7ff596821fd3605cfa5b760321866456a1d6590b984a",
 }
 
 // Platform maps GOOS/GOARCH to SonarSource's artifact platform names.
@@ -41,6 +42,8 @@ func Platform(goos, goarch string) (osDir, platform string, err error) {
 		return "linux", "linux-arm64", nil
 	case goos == "darwin" && goarch == "arm64":
 		return "macos", "macos-arm64", nil
+	case goos == "windows" && goarch == "amd64":
+		return "windows", "windows-x86-64", nil
 	case goos == "darwin" && goarch == "amd64":
 		return "", "", errors.New("SonarSource publishes no macOS x86-64 build of the sonar CLI; install it another way and set sonar.path in ~/.config/sqa/config.yaml")
 	}
@@ -57,9 +60,34 @@ type Installer struct {
 	GOARCH  string
 }
 
+// ArtifactExt is the official SonarSource artifact suffix for platform
+// (.bin on Unix, .exe on Windows).
+func ArtifactExt(platform string) string {
+	if strings.HasPrefix(platform, "windows-") {
+		return ".exe"
+	}
+	return ".bin"
+}
+
+// ExeSuffix is the extracted / managed sonar filename suffix for a GOOS
+// (".exe" on Windows, empty otherwise).
+func ExeSuffix(goos string) string {
+	if goos == "windows" {
+		return ".exe"
+	}
+	return ""
+}
+
+func fileSuffix(platform string) string {
+	if strings.HasPrefix(platform, "windows-") {
+		return ".exe"
+	}
+	return ""
+}
+
 // ArtifactURL returns the binary URL for version/platform.
 func (in *Installer) ArtifactURL(version, osDir, platform string) string {
-	return fmt.Sprintf("%s/%s/%s/sonarqube-cli-%s-%s.bin", strings.TrimRight(in.BaseURL, "/"), version, osDir, version, platform)
+	return fmt.Sprintf("%s/%s/%s/sonarqube-cli-%s-%s%s", strings.TrimRight(in.BaseURL, "/"), version, osDir, version, platform, ArtifactExt(platform))
 }
 
 // InstallResult describes a finished install.
@@ -144,7 +172,7 @@ func (in *Installer) Install(ctx context.Context, version, dest string) (*Instal
 	if err := os.Chmod(tmp.Name(), 0o755); err != nil { //nolint:gosec // executable binary
 		return nil, err
 	}
-	if err := os.Rename(tmp.Name(), dest); err != nil {
+	if err := replaceFile(tmp.Name(), dest); err != nil {
 		return nil, err
 	}
 	return res, nil

@@ -179,7 +179,11 @@ func (e *Environment) Prepare() error {
 	f, err := os.OpenFile(e.CredentialsFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, CredentialsFileMode) //nolint:gosec // path is sqa's credentials file (config or env)
 	switch {
 	case err == nil:
-		return f.Close()
+		if err := f.Close(); err != nil {
+			return err
+		}
+		_, err := TightenFile(e.CredentialsFile)
+		return err
 	case errors.Is(err, fs.ErrExist):
 		_, err := e.Secure()
 		return err
@@ -190,35 +194,34 @@ func (e *Environment) Prepare() error {
 	}
 }
 
-// Secure sets the credentials file to 0600 if it exists with any other
-// mode, and reports the mode it had when it changed it. It runs after every
-// sonar invocation as well, in case sonar (or anything else) replaced the
-// file. It never reads the file.
-func (e *Environment) Secure() (was fs.FileMode, err error) {
+// Secure makes the credentials file private if it exists (0600 on Unix, a
+// user-only ACL on Windows) and reports the previous protection when it
+// changed it. It runs after every sonar invocation as well, in case sonar
+// (or anything else) replaced the file. It never reads the file.
+func (e *Environment) Secure() (changed string, err error) {
 	if e.Store != StoreFile {
-		return 0, nil
+		return "", nil
 	}
 	st, err := os.Stat(e.CredentialsFile)
 	if errors.Is(err, fs.ErrNotExist) {
-		return 0, nil
+		return "", nil
 	}
 	if err != nil {
-		return 0, fmt.Errorf("credentials file: %w", err)
+		return "", fmt.Errorf("credentials file: %w", err)
 	}
 	if !st.Mode().IsRegular() {
-		return 0, fmt.Errorf("credentials file %s is not a regular file", e.CredentialsFile)
+		return "", fmt.Errorf("credentials file %s is not a regular file", e.CredentialsFile)
 	}
-	if st.Mode().Perm() == CredentialsFileMode {
-		return 0, nil
+	changed, err = TightenFile(e.CredentialsFile)
+	if err != nil {
+		return "", fmt.Errorf("credentials file: %w", err)
 	}
-	if err := os.Chmod(e.CredentialsFile, CredentialsFileMode); err != nil {
-		return 0, fmt.Errorf("credentials file: %w", err)
-	}
-	return st.Mode().Perm(), nil
+	return changed, nil
 }
 
 // privateDir creates dir (and parents) with 0700. With tighten, an existing
-// dir is chmodded to 0700 too; sqa only does that for its own directories.
+// dir is also made private (chmod 0700, or a user-only ACL on Windows); sqa
+// only does that for its own directories.
 func privateDir(dir string, tighten bool) error {
 	if err := os.MkdirAll(dir, PrivateDirMode); err != nil {
 		return fmt.Errorf("create %s: %w", dir, err)
@@ -226,14 +229,8 @@ func privateDir(dir string, tighten bool) error {
 	if !tighten {
 		return nil
 	}
-	st, err := os.Stat(dir)
-	if err != nil {
-		return err
-	}
-	if st.Mode().Perm() != PrivateDirMode {
-		if err := os.Chmod(dir, PrivateDirMode); err != nil {
-			return fmt.Errorf("chmod %s: %w", dir, err)
-		}
+	if _, err := TightenDir(dir); err != nil {
+		return fmt.Errorf("protect %s: %w", dir, err)
 	}
 	return nil
 }

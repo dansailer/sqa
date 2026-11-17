@@ -1,7 +1,9 @@
 # Third-party notices
 
-Release builds of `sqa` (`sqa_<version>_linux_amd64.tar.gz`) contain the
-following third-party software. `sqa` itself is MIT licensed (see `LICENSE`).
+Release builds of `sqa` (`sqa_<version>_linux_amd64.tar.gz` and
+`sqa_<version>_windows_amd64.zip`) contain the following third-party
+software. `sqa` itself is MIT licensed (see `LICENSE`). Each archive embeds
+only the official `sonar` binary for that platform.
 
 ## SonarQube CLI (`sonar`)
 
@@ -12,18 +14,22 @@ following third-party software. `sqa` itself is MIT licensed (see `LICENSE`).
 | Copyright | Copyright (C) SonarSource Sàrl |
 | License | GNU Lesser General Public License v3.0 (LGPL-3.0), see `licenses/sonarqube-cli-LGPL-3.0.txt`; the LGPL incorporates the GNU GPL v3.0, see `licenses/sonarqube-cli-GPL-3.0.txt` |
 | Source code | https://github.com/SonarSource/sonarqube-cli (this version: tag [`1.12.0.17622`](https://github.com/SonarSource/sonarqube-cli/tree/1.12.0.17622)) |
-| Binary redistributed | https://binaries.sonarsource.com/Distribution/sonarqube-cli/1.12.0.17622/linux/sonarqube-cli-1.12.0.17622-linux-x86-64.bin |
-| SHA-256 | `c692e64dad89ea9e2388ec338dad47fa8703954e1c0ca8af111bc43e34afaa99` |
+| Binary redistributed (linux/amd64) | https://binaries.sonarsource.com/Distribution/sonarqube-cli/1.12.0.17622/linux/sonarqube-cli-1.12.0.17622-linux-x86-64.bin |
+| SHA-256 (linux/amd64) | `c692e64dad89ea9e2388ec338dad47fa8703954e1c0ca8af111bc43e34afaa99` |
+| Binary redistributed (windows/amd64) | https://binaries.sonarsource.com/Distribution/sonarqube-cli/1.12.0.17622/windows/sonarqube-cli-1.12.0.17622-windows-x86-64.exe |
+| SHA-256 (windows/amd64) | `52dc02877bfc25bd436f7ff596821fd3605cfa5b760321866456a1d6590b984a` |
 
 The binary is redistributed **unmodified**, exactly as published by
-SonarSource at the URL above. It is stored as an opaque file inside the `sqa`
-executable and, on first use, written unchanged to
-`~/.local/share/sqa/bin/sonar-1.12.0.17622` (or under `$XDG_DATA_HOME`), where
-its SHA-256 is checked against the value above. `sqa` runs it as a separate
+SonarSource at the URL for your platform above. It is stored as an opaque
+file inside the `sqa` executable and, on first use, written unchanged to
+`~/.local/share/sqa/bin/sonar-1.12.0.17622` (or under `$XDG_DATA_HOME`), or
+to `%LOCALAPPDATA%\sqa\bin\sonar-1.12.0.17622.exe` on Windows, where its
+SHA-256 is checked against the value above. `sqa` runs it as a separate
 program; it is not linked into `sqa`. You can verify it yourself:
 
 ```sh
 sha256sum ~/.local/share/sqa/bin/sonar-1.12.0.17622
+# Windows: Get-FileHash "$env:LOCALAPPDATA\sqa\bin\sonar-1.12.0.17622.exe"
 ```
 
 The binary is a self-contained executable built by SonarSource. Third-party
@@ -33,7 +39,8 @@ licenses as listed in the upstream repository.
 ### Replacing the bundled `sonar`
 
 You may use any other build of the SonarQube CLI, including one you built from
-the source above. Set `sonar.path` in `~/.config/sqa/config.yaml`:
+the source above. Set `sonar.path` in `~/.config/sqa/config.yaml` (or
+`%APPDATA%\sqa\config.yaml` on Windows):
 
 ```yaml
 sonar:

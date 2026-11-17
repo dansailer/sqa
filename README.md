@@ -9,7 +9,7 @@ decision**.
   which release builds **bundle inside the `sqa` binary**: one download
   contains everything. All server traffic goes through it, so `sqa` has no HTTP client for SonarQube
   and never reads, stores or prints a token.
-- Keeps your login in a `0600` credentials file, like `terraform login` or
+- Keeps your login in a private credentials file (`0600`, or a user-only ACL on Windows), like `terraform login` or
   `oc login`, so Linux needs no keychain (libsecret) setup.
 - **No MCP.** `sqa` never installs or calls a SonarQube MCP server and never runs
   `sonar integrate` or `sonar remediate`.
@@ -37,11 +37,12 @@ decision**.
 
 ## Install
 
-Release binaries are currently built for **Linux amd64 only**. Each release
-contains the official SonarSource `sonar` CLI (`1.12.0.17622`, unmodified,
-LGPL-3.0, see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)). On first use
-`sqa` extracts it to `~/.local/share/sqa/bin/sonar-<version>` and checks its
-SHA-256.
+Release binaries are built for **Linux amd64** and **Windows amd64**. Each
+release contains the official SonarSource `sonar` CLI (`1.12.0.17622`,
+unmodified, LGPL-3.0, see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)).
+On first use `sqa` extracts it to `~/.local/share/sqa/bin/sonar-<version>`
+(or `%LOCALAPPDATA%\sqa\bin\sonar-<version>.exe` on Windows) and checks
+its SHA-256.
 
 ### With mise (recommended)
 
@@ -58,7 +59,7 @@ the skill with every new version. Use
 `--postinstall "sqa skill install && sqa skill install --target claude"` if you
 also use Claude Code.
 
-### With curl | sh
+### With curl | sh (Linux)
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/dansailer/sqa/main/install.sh | sh
@@ -68,16 +69,29 @@ curl -fsSL https://raw.githubusercontent.com/dansailer/sqa/main/install.sh | sh
 Installs to `$SQA_INSTALL_DIR` (default `~/.local/bin`), verifies the archive
 against `checksums.txt`, and runs `sqa skill install` (skip with `--no-skill`).
 
-While the repository is private, both methods need a GitHub token to see the
-releases: `export GITHUB_TOKEN=$(gh auth token)` (or an authenticated `gh`;
-mise also accepts `MISE_GITHUB_TOKEN`).
+### With PowerShell (Windows)
+
+```powershell
+irm https://raw.githubusercontent.com/dansailer/sqa/main/install.ps1 | iex
+# pin a release:  $env:SQA_VERSION = 'v0.3.0'; irm ... | iex
+```
+
+Installs to `$env:SQA_INSTALL_DIR` (default `%LOCALAPPDATA%\Programs\sqa`),
+verifies the archive against `checksums.txt`, and runs `sqa skill install`
+(skip with `$env:SQA_NO_SKILL = '1'`).
+
+mise also works on Windows. While the repository is private, every method
+needs a GitHub token to see the releases: `export GITHUB_TOKEN=$(gh auth token)`
+(or `$env:GITHUB_TOKEN = (gh auth token)`), or an authenticated `gh`; mise
+also accepts `MISE_GITHUB_TOKEN`.
 
 ### Which `sonar` is used
 
 1. `sonar.path` from the config file, if set.
 2. The bundled `sonar` (release builds), extracted on first use. Skipped when
    `sonar.version` in the config names a different version.
-3. The `sonar` installed by `sqa setup` (`~/.local/share/sqa/bin/sonar`).
+3. The `sonar` installed by `sqa setup` (`~/.local/share/sqa/bin/sonar`, or
+   `%LOCALAPPDATA%\sqa\bin\sonar.exe` on Windows).
 4. `sonar` on your `PATH`.
 
 `sqa version` and `sqa doctor` show whether `sonar` is bundled and which one is
@@ -105,8 +119,10 @@ sqa show AYx1z2                                        # brief for a specific ke
 only tells it where and never opens the file itself.
 
 - **File store (default).** The token is kept in
-  `~/.config/sqa/credentials.json` (`$XDG_CONFIG_HOME/sqa/`), plain-text JSON
-  with mode `0600` in a `0700` directory, the same model as
+  `~/.config/sqa/credentials.json` (`$XDG_CONFIG_HOME/sqa/`, or
+  `%APPDATA%\sqa\credentials.json` on Windows), plain-text JSON with
+  mode `0600` in a `0700` directory (on Windows, a DACL granting only your
+  user account full control), the same model as
   `~/.terraform.d/credentials.tfrc.json` or `~/.kube/config`. `sqa` creates the
   file with `0600` before `sonar` first writes to it and re-checks the mode
   after every `sonar` run; `sqa doctor` reports and fixes wrong permissions.
@@ -123,7 +139,8 @@ only tells it where and never opens the file itself.
   take precedence over any stored login.
 
 `sqa` runs `sonar` with its own home directory
-(`~/.local/share/sqa/sonar-home`, override with `sonar.home`) instead of
+(`~/.local/share/sqa/sonar-home`, or `%LOCALAPPDATA%\sqa\sonar-home` on
+Windows; override with `sonar.home`) instead of
 `~/.sonar`, so a login made with a standalone `sonar` is not picked up: run
 `sqa auth login` once. This also keeps `sonar` from downloading the
 `sonar-secrets` scanner (see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)).
@@ -213,7 +230,7 @@ in `credentials.json` next to it, written by `sonar`:
 default_project: my-service    # used when --project is omitted (else sonar auto-detects)
 auth:
   store: file                  # file (default) or keychain
-  credentials_file: ""         # default ~/.config/sqa/credentials.json
+  credentials_file: ""         # default ~/.config/sqa/credentials.json (%APPDATA%\sqa\ on Windows)
 sonar:
   version: "1.12.0.17622"      # sonar CLI version (default: bundled/pinned); another value uses `sqa setup --sonar-version` downloads
   path: ""                     # use this sonar binary instead of the bundled or downloaded one
@@ -225,7 +242,7 @@ skills:
 
 ## Security notes
 
-- Tokens are handled only by `sonar`, which stores them in sqa's `0600`
+- Tokens are handled only by `sonar`, which stores them in sqa's private
   credentials file (or the OS keychain with `auth.store: keychain`) or reads
   `SONARQUBE_CLI_*` env vars. `sqa` only manages the file's path and
   permissions and never reads, logs or prints a token.

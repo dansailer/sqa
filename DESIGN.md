@@ -13,7 +13,7 @@ A single-binary Go CLI (`sqa`) that lets coding harnesses (Grok, OpenCode, Claud
 | C1 | Targets internally hosted **SonarQube Server 2025.1+**. |
 | C2 | **Contains / builds on the official SonarSource `sonar` CLI** ([SonarSource/sonarqube-cli](https://github.com/SonarSource/sonarqube-cli)). |
 | C3 | **No MCP.** Must not install, configure or call any SonarQube MCP server. `sonar integrate` is never run (it installs MCP and hooks). |
-| C4 | **`sqa` never handles tokens.** Authentication is fully delegated to the official CLI: `sonar auth login` (browser flow or `--with-token`; `sonar` stores the token in sqa's `0600` credentials file, or the OS keychain on request) for interactive use, or `SONARQUBE_CLI_SERVER` + `SONARQUBE_CLI_TOKEN` env vars for CI and headless agents. |
+| C4 | **`sqa` never handles tokens.** Authentication is fully delegated to the official CLI: `sonar auth login` (browser flow or `--with-token`; `sonar` stores the token in sqa's private credentials file — `0600` on Unix, a user-only ACL on Windows — or the OS keychain on request) for interactive use, or `SONARQUBE_CLI_SERVER` + `SONARQUBE_CLI_TOKEN` env vars for CI and headless agents. |
 | C5 | **Human-in-the-loop triage.** Agents must ask the user explicitly before any triage decision; once approved, the agent may execute it. |
 | C6 | Go, single static binary that **contains the official `sonar` CLI** (one download = everything). Release target for now: **Linux amd64 only**; macOS and arm64 builds are temporarily not provided. |
 | C7 | One SonarQube instance (no multi-server profiles). |
@@ -37,7 +37,7 @@ harness (Grok / OpenCode / Claude / …)
         │  reads SKILL.md, runs shell commands
         ▼
       sqa  (Go binary)
-        ├── config resolution (~/.config/sqa/config.yaml, no secrets)
+        ├── config resolution (~/.config/sqa/config.yaml or %APPDATA%\sqa\config.yaml, no secrets)
         ├── issue reads ──────────► `sonar list issues` ─┐
         ├── hotspots, rules, source,                    ├─► SonarQube Server
         │   status changes ────────► `sonar api get|post` ┘
@@ -50,11 +50,11 @@ harness (Grok / OpenCode / Claude / …)
 ### 4.1 Bundling the official `sonar` CLI
 
 - `sqa` pins a tested `sonar` version: **1.12.0.17622** (`sonarcli.PinnedVersion`), with the SHA-256 SonarSource publishes for each platform binary **compiled into `sqa`** (`pinnedChecksums`).
-- Official source (the same as SonarSource's own `install.sh`): `https://binaries.sonarsource.com/Distribution/sonarqube-cli/<version>/<os>/sonarqube-cli-<version>-<platform>.bin`, checksum at `<binary>.sha256`. The GitHub releases of `SonarSource/sonarqube-cli` carry no binary assets.
-- **Release builds embed it.** `mise run fetch-sonar` (`tools/fetch-sonar`, reusing `sonarcli.Installer`) downloads the linux-x86-64 binary to `internal/sonarcli/bundled/sonar-linux-amd64` (gitignored, never committed) and verifies it against the compiled-in checksum. `mise run build-bundled` builds with `-tags bundled_sonar`, which compiles `bundled_on.go` (`//go:embed bundled/sonar-linux-amd64`). The tag is only valid for linux/amd64: on any other target `bundled_unsupported.go` breaks the build on purpose. Without the tag (`go install`, plain `go build`), nothing is embedded and `sqa` behaves as before.
-- **Extraction.** The OS can only exec a file, so on first use `sqa` writes the embedded bytes to `~/.local/share/sqa/bin/sonar-<version>` (`XDG_DATA_HOME` honoured): hash the embedded bytes, write to a temp file in the same directory, fsync, hash the written file, `chmod 0755`, atomic rename. A stamp file `sonar-<version>.verified` records digest, size and mtime; later runs only stat the file and compare (cheap), and re-hash when size or mtime changed, re-extracting on mismatch. Binaries left by other versions (`sonar-<other>`) are removed. The versioned file name means an upgrade never overwrites a binary another `sqa` process is running.
-- **Resolution order:** `sonar.path` from config → bundled (extracted) → `sqa setup` download (`~/.local/share/sqa/bin/sonar`) → `sonar` on `PATH`. Setting `sonar.version` in config to a version other than the bundled one skips the bundle.
-- **`sqa setup`** is optional with a bundled build: it performs (or with `--force` redoes) the extraction, runs `sonar --version` and reports. `sqa setup --sonar-version <v>` with another version downloads that official release (pinned checksum, or the published `.sha256` for other versions) to `~/.local/share/sqa/bin/sonar`, as for non-bundled builds. SonarSource publishes downloads for linux-x86-64, linux-arm64 and macos-arm64 (no macOS x86-64).
+- Official source (the same as SonarSource's own `install.sh` / `install.ps1`): `https://binaries.sonarsource.com/Distribution/sonarqube-cli/<version>/<os>/sonarqube-cli-<version>-<platform>.bin` (`.exe` on Windows), checksum at `<binary>.sha256`. The GitHub releases of `SonarSource/sonarqube-cli` carry no binary assets.
+- **Release builds embed it.** `mise run fetch-sonar` / `fetch-sonar-windows` (`tools/fetch-sonar -os/-arch`, reusing `sonarcli.Installer`) downloads the matching official binary to `internal/sonarcli/bundled/sonar-linux-amd64` or `sonar-windows-amd64.exe` (gitignored, never committed) and verifies it against the compiled-in checksum. `mise run build-bundled` and `build-bundled-windows` build with `-tags bundled_sonar`, which compiles `bundled_on.go` or `bundled_on_windows_amd64.go` (`//go:embed` of only that platform's binary). The tag is only valid for linux/amd64 and windows/amd64: on any other target `bundled_unsupported.go` breaks the build on purpose. Without the tag (`go install`, plain `go build`), nothing is embedded and `sqa` behaves as before.
+- **Extraction.** The OS can only exec a file, so on first use `sqa` writes the embedded bytes to `~/.local/share/sqa/bin/sonar-<version>` (`XDG_DATA_HOME` honoured), or `%LOCALAPPDATA%\sqa\bin\sonar-<version>.exe` on Windows: hash the embedded bytes, write to a temp file in the same directory, fsync, hash the written file, `chmod 0755`, and rename into place (on Windows, replace an existing file first because `os.Rename` cannot overwrite). A stamp file `sonar-<version>[.exe].verified` records digest, size and mtime; later runs only stat the file and compare (cheap), and re-hash when size or mtime changed, re-extracting on mismatch. The Unix executable-bit check is skipped on Windows. Binaries left by other versions (`sonar-<other>`) are removed. The versioned file name means an upgrade never overwrites a binary another `sqa` process is running.
+- **Resolution order:** `sonar.path` from config → bundled (extracted) → `sqa setup` download (`~/.local/share/sqa/bin/sonar`, or `sonar.exe` on Windows) → `sonar` on `PATH`. Setting `sonar.version` in config to a version other than the bundled one skips the bundle.
+- **`sqa setup`** is optional with a bundled build: it performs (or with `--force` redoes) the extraction, runs `sonar --version` and reports. `sqa setup --sonar-version <v>` with another version downloads that official release (pinned checksum, or the published `.sha256` for other versions) to the managed path, as for non-bundled builds. SonarSource publishes downloads for linux-x86-64, linux-arm64, macos-arm64 and windows-x86-64 (no macOS x86-64).
 - **`sqa version` / `sqa doctor`** report whether `sonar` is bundled, its version and SHA-256, and which source is in use (`sonar.path`, `bundled`, `sqa setup`, `PATH`). `version` never writes anything; `doctor` extracts if needed.
 - **Updates.** A new `sonar` means a new `sqa` release. `.github/workflows/sonar-update.yml` runs weekly (and on demand), reads `stable.version` from the distribution URL above (what SonarSource's `install.sh` uses to resolve the latest release), and opens an issue with the new version, binary URL and published checksum when it is newer than `PinnedVersion`. It never commits code or binaries; bumping is a reviewed change to `install.go` and `THIRD_PARTY_NOTICES.md` (a test keeps the two in step).
 - `sqa` always invokes this binary (or `sonar.path`) with sqa's token store and `sonar` home (§5), and inherits the `SONARQUBE_CLI_*` env vars, which take precedence over a stored login. `sqa` never reads, stores or prints a token, and never runs `sonar integrate`.
@@ -99,11 +99,11 @@ Auth, TLS and proxy: handled by `sonar` (see `sonar config` for proxy/CA setting
 - `SONARQUBE_CLI_KEYCHAIN_FILE` = `auth.credentials_file`, default `$XDG_CONFIG_HOME/sqa/credentials.json`. Not set with `auth.store: keychain`.
 - `SONAR_USER_HOME` = `sonar.home`, default `$XDG_DATA_HOME/sqa/sonar-home`. sqa's own `state.json` never lists `sonar-secrets` (only `sonar integrate`, `analyze secrets` and the git hooks install it, and sqa runs none of them), so `sonar`'s post-upgrade dependency repair never downloads it. Logins made with a standalone `sonar` in `~/.sonar` are not shared.
 - Precedence: a non-empty variable in the user's environment (`sonar` reads it anyway) → `config.yaml` → default. An empty `SONAR_USER_HOME` is replaced, since `sonar` would resolve it against the working directory.
-- Permissions, without reading the file: before each run, sqa's own directories are created or tightened to `0700` (a configured or env-provided parent is created `0700` if missing but never chmodded), and the credentials file is created empty with `O_CREAT|O_EXCL`, mode `0600`, if missing (`sonar` treats an unparsable file as empty). `writeFileSync` truncates an existing file in place and keeps its mode, so the token is never in a world-readable file regardless of umask (verified against the bundled 1.12.0.17622). After each run sqa `chmod`s the file to `0600` again in case anything replaced it. Changing the process umask was rejected: it is process-wide in Go and racy with other goroutines, and the pre-created file makes it unnecessary.
+- Permissions, without reading the file: before each run, sqa's own directories are created or tightened to `0700` (a configured or env-provided parent is created `0700` if missing but never chmodded), and the credentials file is created empty with `O_CREAT|O_EXCL`, mode `0600`, if missing (`sonar` treats an unparsable file as empty). `writeFileSync` truncates an existing file in place and keeps its mode, so the token is never in a world-readable file regardless of umask (verified against the bundled 1.12.0.17622). After each run sqa `chmod`s the file to `0600` again in case anything replaced it. Changing the process umask was rejected: it is process-wide in Go and racy with other goroutines, and the pre-created file makes it unnecessary. On Windows, mode bits are not enforced: `sqa` instead sets a protected DACL on the credentials file and on sqa's own directories, granting only the current user SID full control (`golang.org/x/sys/windows` `SetNamedSecurityInfo` with `PROTECTED_DACL_SECURITY_INFORMATION`). `sqa doctor` uses the same check and repair, and does not report Unix modes there.
 - `DO_NOT_TRACK=1` unless the user's environment has `DO_NOT_TRACK` at all (passed through as is, even `0` or empty) or `sonar.telemetry: true`. Upstream `isTelemetryEnabled()` (`telemetry.enabled` config and `DO_NOT_TRACK === "1"`) gates event emission, the detached `flush-telemetry` worker, the flush itself and `initSentry()`, so one variable covers usage telemetry (`events.sonardata.io`) and Sentry. The internal `__SQ_CLI_TELEMETRY_EGRESS` switch is not used: it is undocumented and only controls egress, not collection. `doctor` and `version` print the state (`telemetry: off (…)`).
 - `sonar` labels a stored login `OS Keychain` even when it comes from the file; `sqa auth status` and `sqa doctor` relabel it `credentials file` and print the store and home. `doctor` reports (and fixes) wrong permissions before running `sonar`, and maps the two Linux keychain errors (`libsecret could not be loaded`, `org.freedesktop.secrets`) to fixes only when `auth.store: keychain`.
 
-**Config file** `~/.config/sqa/config.yaml` (no secrets, optional):
+**Config file** `~/.config/sqa/config.yaml` (or `%APPDATA%\sqa\config.yaml` on Windows; no secrets, optional):
 
 ```yaml
 default_project: my-service   # optional; otherwise sonar auto-detects / sonar link
@@ -119,7 +119,7 @@ skills:
   default_dir: ~/.agents/skills
 ```
 
-Location: `$SQA_CONFIG`, else `$XDG_CONFIG_HOME/sqa/config.yaml`, else `~/.config/sqa/config.yaml`.
+Location: `$SQA_CONFIG`, else `$XDG_CONFIG_HOME/sqa/config.yaml`, else `~/.config/sqa/config.yaml` (on Windows, `%APPDATA%\sqa\config.yaml` when no XDG override is set).
 
 Project resolution: `--project` → `default_project` → `sonar` auto-detection (`sonar link`). If none works, `sqa findings` exits 2 asking for `--project`.
 
@@ -212,7 +212,7 @@ sqa/
 │   ├── cli/         # cobra commands, exit codes
 │   ├── config/      # config file, XDG directories
 │   ├── sonarcli/    # pinned sonar: bundle/extract, download, resolve, invocation, output parsing
-│   │   └── bundled/ # sonar-linux-amd64 fetched at build time (gitignored)
+│   │   └── bundled/ # sonar-linux-amd64 or sonar-windows-amd64.exe fetched at build time (gitignored)
 │   ├── findings/    # normalisation + ranking
 │   ├── approval/    # guardrails + audit log
 │   └── output/      # toon/json/md/table renderers

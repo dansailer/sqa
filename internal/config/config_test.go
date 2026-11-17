@@ -84,3 +84,72 @@ func TestDefaultTokenPaths(t *testing.T) {
 		t.Fatalf("got %s %s", c, h)
 	}
 }
+
+func TestDirOfWindows(t *testing.T) {
+	getenv := func(k string) string {
+		return map[string]string{
+			"APPDATA":      `C:\Users\x\AppData\Roaming`,
+			"LOCALAPPDATA": `C:\Users\x\AppData\Local`,
+		}[k]
+	}
+	c, err := dirOf("config", "windows", getenv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c != filepath.Join(`C:\Users\x\AppData\Roaming`, "sqa") {
+		t.Errorf("config %s", c)
+	}
+	d, err := dirOf("data", "windows", getenv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d != filepath.Join(`C:\Users\x\AppData\Local`, "sqa") {
+		t.Errorf("data %s", d)
+	}
+	s, err := dirOf("state", "windows", getenv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s != d {
+		t.Errorf("state %s, want same as data %s", s, d)
+	}
+}
+
+func TestDirOfWindowsXDGWins(t *testing.T) {
+	getenv := func(k string) string {
+		return map[string]string{
+			"APPDATA":         `C:\Users\x\AppData\Roaming`,
+			"LOCALAPPDATA":    `C:\Users\x\AppData\Local`,
+			"XDG_CONFIG_HOME": `D:\xdgconfig`,
+			"XDG_DATA_HOME":   `D:\xdgdata`,
+			"XDG_STATE_HOME":  `D:\xdgstate`,
+		}[k]
+	}
+	c, _ := dirOf("config", "windows", getenv)
+	d, _ := dirOf("data", "windows", getenv)
+	s, _ := dirOf("state", "windows", getenv)
+	if c != filepath.Join(`D:\xdgconfig`, "sqa") || d != filepath.Join(`D:\xdgdata`, "sqa") || s != filepath.Join(`D:\xdgstate`, "sqa") {
+		t.Fatalf("config=%s data=%s state=%s", c, d, s)
+	}
+}
+
+func TestExeSuffix(t *testing.T) {
+	if exeSuffix("windows") != ".exe" {
+		t.Fatal("windows")
+	}
+	if exeSuffix("linux") != "" || exeSuffix("darwin") != "" {
+		t.Fatal("unix")
+	}
+}
+
+func TestExpandHomeBackslash(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	got, err := ExpandHome(`~\sonar.exe`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != filepath.Join(home, "sonar.exe") {
+		t.Fatalf("got %s", got)
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -27,9 +28,15 @@ var bundled *Bundle
 // Bundled returns the sonar binary embedded in this build, or nil.
 func Bundled() *Bundle { return bundled }
 
-// FileName is the name the bundle is extracted under (sonar-<version>), so
-// upgrades of the bundled version never overwrite a binary that is in use.
-func (b *Bundle) FileName() string { return "sonar-" + b.Version }
+// FileName is the name the bundle is extracted under (sonar-<version>, or
+// sonar-<version>.exe on Windows), so upgrades of the bundled version never
+// overwrite a binary that is in use.
+func (b *Bundle) FileName() string {
+	if b == nil {
+		return ""
+	}
+	return "sonar-" + b.Version + fileSuffix(b.Platform)
+}
 
 // ExtractResult describes the extracted binary.
 type ExtractResult struct {
@@ -95,7 +102,7 @@ func (b *Bundle) Extract(dir string, force bool) (*ExtractResult, error) {
 	if err := os.Chmod(tmp.Name(), 0o755); err != nil { //nolint:gosec // executable binary
 		return nil, err
 	}
-	if err := os.Rename(tmp.Name(), dest); err != nil {
+	if err := replaceFile(tmp.Name(), dest); err != nil {
 		return nil, err
 	}
 	if err := writeStamp(dest, want); err != nil {
@@ -122,7 +129,11 @@ func verifiedOnDisk(dest, want string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if !st.Mode().IsRegular() || st.Mode().Perm()&0o100 == 0 {
+	if !st.Mode().IsRegular() {
+		return false, nil
+	}
+	// Windows has no Unix executable bit; skip this check there.
+	if runtime.GOOS != "windows" && st.Mode().Perm()&0o100 == 0 {
 		return false, nil
 	}
 	if stamp, err := os.ReadFile(stampPath(dest)); err == nil && strings.TrimSpace(string(stamp)) == want+" "+statKey(st) {

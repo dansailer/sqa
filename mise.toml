@@ -1,7 +1,7 @@
 # Tools and tasks for sqa. `mise install` sets up the pinned toolchain,
 # `mise tasks` lists the tasks, `mise run <task>` runs one. CI runs the same
-# tasks. Release builds embed the official sonar CLI (linux/amd64 only) with
-# the bundled_sonar build tag.
+# tasks. Release builds embed the official sonar CLI (linux/amd64 or
+# windows/amd64) with the bundled_sonar build tag.
 #
 # Overrides: VERSION (default dev) and COMMIT (default `git rev-parse HEAD`),
 # e.g. `VERSION=v0.1.0 mise run build-bundled`.
@@ -17,6 +17,7 @@ idiomatic_version_file_enable_tools = ["go"]
 
 [vars]
 sonar_bin = "internal/sonarcli/bundled/sonar-linux-amd64"
+sonar_bin_windows = "internal/sonarcli/bundled/sonar-windows-amd64.exe"
 ldflags = '-s -w -X github.com/dansailer/sqa/internal/cli.version=${VERSION:-dev} -X github.com/dansailer/sqa/internal/cli.commit=${COMMIT:-$(git rev-parse HEAD 2>/dev/null)}'
 
 [tasks.build]
@@ -26,7 +27,11 @@ run = 'go build -trimpath -ldflags "{{vars.ldflags}}" -o sqa ./cmd/sqa'
 
 [tasks.fetch-sonar]
 description = "Download the pinned sonar for linux/amd64 and verify its SHA-256"
-run = "go run ./tools/fetch-sonar -o {{vars.sonar_bin}}"
+run = "go run ./tools/fetch-sonar -os linux -arch amd64 -o {{vars.sonar_bin}}"
+
+[tasks.fetch-sonar-windows]
+description = "Download the pinned sonar for windows/amd64 and verify its SHA-256"
+run = "go run ./tools/fetch-sonar -os windows -arch amd64 -o {{vars.sonar_bin_windows}}"
 
 [tasks.sonar-version]
 description = "Print the pinned sonar version"
@@ -41,6 +46,25 @@ run = [
   'go build -tags bundled_sonar -trimpath -ldflags "{{vars.ldflags}}" -o sqa ./cmd/sqa',
   "ls -l sqa",
 ]
+
+[tasks.build-bundled-windows]
+description = "Cross-compile windows/amd64 ./sqa.exe with the official sonar embedded"
+depends = ["fetch-sonar-windows"]
+env = { CGO_ENABLED = "0", GOOS = "windows", GOARCH = "amd64" }
+run = [
+  'go build -tags bundled_sonar -trimpath -ldflags "{{vars.ldflags}}" -o sqa.exe ./cmd/sqa',
+  "ls -l sqa.exe",
+]
+
+[tasks.build-windows]
+description = "Cross-compile ./sqa.exe for windows/amd64 (unbundled)"
+env = { CGO_ENABLED = "0", GOOS = "windows", GOARCH = "amd64" }
+run = 'go build -trimpath -ldflags "{{vars.ldflags}}" -o sqa.exe ./cmd/sqa'
+
+[tasks.vet-windows]
+description = "go vet for the windows/amd64 target"
+env = { CGO_ENABLED = "0", GOOS = "windows", GOARCH = "amd64" }
+run = "go vet ./..."
 
 [tasks.test]
 description = "Run the tests with the race detector"
@@ -71,10 +95,10 @@ description = "Scan dependencies and code for known vulnerabilities (govulncheck
 run = "go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./..."
 
 [tasks.clean]
-description = "Remove ./sqa and the fetched sonar binary"
-run = "rm -f sqa {{vars.sonar_bin}}"
+description = "Remove built binaries and fetched sonar binaries"
+run = "rm -f sqa sqa.exe {{vars.sonar_bin}} {{vars.sonar_bin_windows}}"
 
 [tasks.all]
-description = "test, test-install, lint-sh, then build"
+description = "test, test-install, lint-sh, then linux and windows builds"
 depends = ["test"]
-run = [{ task = "test-install" }, { task = "lint-sh" }, { task = "build" }]
+run = [{ task = "test-install" }, { task = "lint-sh" }, { task = "build" }, { task = "vet-windows" }, { task = "build-windows" }]

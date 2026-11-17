@@ -21,6 +21,8 @@ func TestThirdPartyNoticesMatchPinnedVersion(t *testing.T) {
 		"tree/" + PinnedVersion,
 		in.ArtifactURL(PinnedVersion, "linux", "linux-x86-64"),
 		PinnedChecksum("linux-x86-64"),
+		in.ArtifactURL(PinnedVersion, "windows", "windows-x86-64"),
+		PinnedChecksum("windows-x86-64"),
 		"sonar-" + PinnedVersion,
 	} {
 		if !strings.Contains(notice, want) {

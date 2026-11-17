@@ -49,10 +49,10 @@ jobs:
         run: mise run test
 
   build:
-    name: Build linux/amd64 (bundled sonar)
+    name: Build linux/amd64 and windows/amd64 (bundled sonar)
     needs: test
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - name: Harden runner
         uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
@@ -84,13 +84,13 @@ jobs:
 
       # Always a fresh download for releases (no cache), verified against the
       # SHA-256 compiled into sqa.
-      - name: Fetch and verify sonar
+      - name: Fetch and verify sonar (linux)
         run: mise run fetch-sonar
 
-      - name: Test embedded sonar
+      - name: Test embedded sonar (linux)
         run: go test -tags bundled_sonar ./internal/sonarcli/
 
-      - name: Build and package
+      - name: Build and package linux/amd64
         env:
           TAG: ${{ github.ref_name }}
         run: |
@@ -111,11 +111,44 @@ jobs:
             -C build -czf "dist/${name}.tar.gz" "${name}"
           ls -l "build/${name}/sqa" dist
 
-      - name: Upload archive
+      - name: Fetch and verify sonar (windows)
+        run: mise run fetch-sonar-windows
+
+      - name: Build and package windows/amd64
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          name="sqa_${version}_windows_amd64"
+          VERSION="${TAG}" COMMIT="${GITHUB_SHA}" mise run build-bundled-windows
+          mkdir -p "build/${name}/licenses" dist
+          mv sqa.exe "build/${name}/sqa.exe"
+          cp LICENSE README.md THIRD_PARTY_NOTICES.md "build/${name}/"
+          cp licenses/sonarqube-cli-LGPL-3.0.txt licenses/sonarqube-cli-GPL-3.0.txt "build/${name}/licenses/"
+          # No smoke test: this is a Windows binary cross-compiled on Linux.
+          python3 - "$name" <<'PY'
+          import sys
+          import zipfile
+          from pathlib import Path
+          name = Path("build") / sys.argv[1]
+          dest = Path("dist") / (sys.argv[1] + ".zip")
+          dest.parent.mkdir(exist_ok=True)
+          with zipfile.ZipFile(dest, "w", compression=zipfile.ZIP_DEFLATED) as z:
+              for p in sorted(name.rglob("*")):
+                  if p.is_file():
+                      z.write(p, p.relative_to(name))
+          print(dest, dest.stat().st_size)
+          PY
+          ls -l "build/${name}/sqa.exe" dist
+
+      - name: Upload archives
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: sqa-linux-amd64
-          path: dist/*.tar.gz
+          name: sqa-archives
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
           if-no-files-found: error
           retention-days: 1
 
@@ -159,7 +192,7 @@ jobs:
         working-directory: dist
         run: |
           set -euo pipefail
-          sha256sum -- *.tar.gz sqa_sbom.spdx.json > checksums.txt
+          sha256sum -- *.tar.gz *.zip sqa_sbom.spdx.json > checksums.txt
           cat checksums.txt
 
       # GitHub only stores attestations for public repos (or org repos on paid plans).
@@ -170,6 +203,7 @@ jobs:
         with:
           subject-path: |
             dist/*.tar.gz
+            dist/*.zip
             dist/checksums.txt
 
       - name: Create GitHub release
@@ -183,4 +217,4 @@ jobs:
             --verify-tag \
             --title "${TAG}" \
             --generate-notes \
-            dist/*.tar.gz dist/checksums.txt dist/sqa_sbom.spdx.json
+            dist/*.tar.gz dist/*.zip dist/checksums.txt dist/sqa_sbom.spdx.json

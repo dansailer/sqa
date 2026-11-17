@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -63,8 +64,8 @@ func Home() (string, error) {
 	return h, nil
 }
 
-func xdg(env, fallback string) (string, error) {
-	if v := os.Getenv(env); v != "" && filepath.IsAbs(v) {
+func xdgWith(getenv func(string) string, env, fallback string) (string, error) {
+	if v := getenv(env); v != "" && filepath.IsAbs(v) {
 		return v, nil
 	}
 	h, err := Home()
@@ -74,28 +75,104 @@ func xdg(env, fallback string) (string, error) {
 	return filepath.Join(h, fallback), nil
 }
 
-// ConfigDir is $XDG_CONFIG_HOME/sqa (default ~/.config/sqa).
+// ConfigDir is $XDG_CONFIG_HOME/sqa (default ~/.config/sqa, or
+// %APPDATA%\sqa on Windows).
 func ConfigDir() (string, error) {
-	d, err := xdg("XDG_CONFIG_HOME", ".config")
-	return filepath.Join(d, "sqa"), err
+	d, err := dirOf("config", runtime.GOOS, os.Getenv)
+	return d, err
 }
 
-// DataDir is $XDG_DATA_HOME/sqa (default ~/.local/share/sqa).
+// DataDir is $XDG_DATA_HOME/sqa (default ~/.local/share/sqa, or
+// %LOCALAPPDATA%\sqa on Windows).
 func DataDir() (string, error) {
-	d, err := xdg("XDG_DATA_HOME", filepath.Join(".local", "share"))
-	return filepath.Join(d, "sqa"), err
+	d, err := dirOf("data", runtime.GOOS, os.Getenv)
+	return d, err
 }
 
-// StateDir is $XDG_STATE_HOME/sqa (default ~/.local/state/sqa).
+// StateDir is $XDG_STATE_HOME/sqa (default ~/.local/state/sqa, or
+// %LOCALAPPDATA%\sqa on Windows).
 func StateDir() (string, error) {
-	d, err := xdg("XDG_STATE_HOME", filepath.Join(".local", "state"))
-	return filepath.Join(d, "sqa"), err
+	d, err := dirOf("state", runtime.GOOS, os.Getenv)
+	return d, err
+}
+
+// dirOf returns the sqa config, data or state directory for goos.
+// Absolute XDG_* overrides win on every OS, including Windows.
+func dirOf(kind, goos string, getenv func(string) string) (string, error) {
+	switch kind {
+	case "config":
+		if v := getenv("XDG_CONFIG_HOME"); envAbs(goos, v) {
+			return filepath.Join(v, "sqa"), nil
+		}
+		if goos == "windows" {
+			return windowsAppDir(getenv, "APPDATA", os.UserConfigDir)
+		}
+		d, err := xdgWith(getenv, "XDG_CONFIG_HOME", ".config")
+		return filepath.Join(d, "sqa"), err
+	case "data":
+		if v := getenv("XDG_DATA_HOME"); envAbs(goos, v) {
+			return filepath.Join(v, "sqa"), nil
+		}
+		if goos == "windows" {
+			return windowsAppDir(getenv, "LOCALAPPDATA", os.UserCacheDir)
+		}
+		d, err := xdgWith(getenv, "XDG_DATA_HOME", filepath.Join(".local", "share"))
+		return filepath.Join(d, "sqa"), err
+	case "state":
+		if v := getenv("XDG_STATE_HOME"); envAbs(goos, v) {
+			return filepath.Join(v, "sqa"), nil
+		}
+		if goos == "windows" {
+			return windowsAppDir(getenv, "LOCALAPPDATA", os.UserCacheDir)
+		}
+		d, err := xdgWith(getenv, "XDG_STATE_HOME", filepath.Join(".local", "state"))
+		return filepath.Join(d, "sqa"), err
+	default:
+		return "", fmt.Errorf("unknown dir kind %q", kind)
+	}
+}
+
+func windowsAppDir(getenv func(string) string, env string, fallback func() (string, error)) (string, error) {
+	if v := getenv(env); envAbs("windows", v) {
+		return filepath.Join(v, "sqa"), nil
+	}
+	d, err := fallback()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(d, "sqa"), nil
+}
+
+func exeSuffix(goos string) string {
+	if goos == "windows" {
+		return ".exe"
+	}
+	return ""
+}
+
+// envAbs reports whether v is an absolute path on goos. filepath.IsAbs uses
+// the host OS, so Windows paths like C:\Users\x must be recognised when
+// these helpers are tested on Linux.
+func envAbs(goos, v string) bool {
+	if v == "" {
+		return false
+	}
+	if filepath.IsAbs(v) {
+		return true
+	}
+	if goos == "windows" {
+		if len(v) >= 3 && v[1] == ':' && (v[2] == '\\' || v[2] == '/') {
+			return true
+		}
+		return strings.HasPrefix(v, `\\`)
+	}
+	return false
 }
 
 // ManagedSonarPath is where `sqa setup` installs the sonar binary.
 func ManagedSonarPath() (string, error) {
 	d, err := DataDir()
-	return filepath.Join(d, "bin", "sonar"), err
+	return filepath.Join(d, "bin", "sonar"+exeSuffix(runtime.GOOS)), err
 }
 
 // SonarBinDir holds sqa-managed sonar binaries: the `sqa setup` download
@@ -161,14 +238,17 @@ func LoadFile(p string) (*Config, error) {
 	return c, nil
 }
 
-// ExpandHome expands a leading "~/" to the user's home directory.
+// ExpandHome expands a leading "~", "~/" or "~\" to the user's home directory.
 func ExpandHome(p string) (string, error) {
-	if p == "~" || strings.HasPrefix(p, "~/") {
+	if p == "~" {
+		return Home()
+	}
+	if strings.HasPrefix(p, "~/") || strings.HasPrefix(p, `~\`) {
 		h, err := Home()
 		if err != nil {
 			return "", err
 		}
-		return filepath.Join(h, strings.TrimPrefix(p, "~")), nil
+		return filepath.Join(h, p[2:]), nil
 	}
 	return p, nil
 }

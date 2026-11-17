@@ -60,19 +60,22 @@ func checkTokenStore(env *sonarcli.Environment) (status, detail string) {
 	var fixed []string
 	if env.CredentialsOrigin == sonarcli.OriginDefault {
 		dir := filepath.Dir(env.CredentialsFile)
-		if st, err := os.Stat(dir); err == nil && st.Mode().Perm() != sonarcli.PrivateDirMode {
-			if err := os.Chmod(dir, sonarcli.PrivateDirMode); err != nil {
+		if _, err := os.Stat(dir); err == nil {
+			changed, err := sonarcli.TightenDir(dir)
+			if err != nil {
 				return "fail", fmt.Sprintf("%s: %v", dir, err)
 			}
-			fixed = append(fixed, fmt.Sprintf("directory was %04o, set to 0700", st.Mode().Perm()))
+			if changed != "" {
+				fixed = append(fixed, fmt.Sprintf("directory was %s, set to %s", changed, sonarcli.PrivateDirLabel()))
+			}
 		}
 	}
 	was, err := env.Secure()
 	if err != nil {
 		return "fail", err.Error()
 	}
-	if was != 0 {
-		fixed = append(fixed, fmt.Sprintf("file was %04o, set to 0600", was))
+	if was != "" {
+		fixed = append(fixed, fmt.Sprintf("file was %s, set to %s", was, sonarcli.PrivateFileLabel()))
 	}
 	d := storeDescription(env)
 	switch _, err := os.Stat(env.CredentialsFile); {
@@ -81,7 +84,7 @@ func checkTokenStore(env *sonarcli.Environment) (status, detail string) {
 	case err != nil:
 		return "fail", err.Error()
 	default:
-		d += " (0600)"
+		d += " (" + sonarcli.PrivateFileLabel() + ")"
 	}
 	if len(fixed) > 0 {
 		return "warn", d + "; fixed permissions: " + strings.Join(fixed, ", ")

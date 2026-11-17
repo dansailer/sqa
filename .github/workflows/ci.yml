@@ -81,6 +81,15 @@ jobs:
           mise run build
           rm -f sqa
 
+      # Cross-compile only: testdata/fake/sonar is a POSIX sh script, so a
+      # windows-latest `go test ./...` job is not cheap and is not run here.
+      - name: Cross-compile and vet Windows amd64
+        if: ${{ !cancelled() }}
+        run: |
+          mise run vet-windows
+          mise run build-windows
+          rm -f sqa.exe
+
       # test-bundled and build-bundled depend on the fetch-sonar task, which
       # downloads only on a cache miss and re-verifies a cached file against
       # the SHA-256 compiled into sqa either way.

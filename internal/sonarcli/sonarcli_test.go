@@ -2,6 +2,7 @@ package sonarcli
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -26,6 +27,7 @@ func TestListIssuesArgs(t *testing.T) {
 func TestPlatform(t *testing.T) {
 	cases := map[[2]string]string{
 		{"linux", "amd64"}: "linux-x86-64", {"linux", "arm64"}: "linux-arm64", {"darwin", "arm64"}: "macos-arm64",
+		{"windows", "amd64"}: "windows-x86-64",
 	}
 	for in, want := range cases {
 		_, p, err := Platform(in[0], in[1])
@@ -39,8 +41,33 @@ func TestPlatform(t *testing.T) {
 	if _, _, err := Platform("darwin", "amd64"); err == nil {
 		t.Error("darwin/amd64 has no official build")
 	}
-	if _, _, err := Platform("windows", "amd64"); err == nil {
-		t.Error("windows unsupported")
+	if _, _, err := Platform("windows", "arm64"); err == nil {
+		t.Error("windows/arm64 unsupported")
+	}
+}
+
+func TestArtifactURLAndFileName(t *testing.T) {
+	in := &Installer{BaseURL: DistributionBaseURL}
+	linux := in.ArtifactURL(PinnedVersion, "linux", "linux-x86-64")
+	if !strings.HasSuffix(linux, ".bin") || !strings.Contains(linux, "linux-x86-64") {
+		t.Errorf("linux url %s", linux)
+	}
+	win := in.ArtifactURL(PinnedVersion, "windows", "windows-x86-64")
+	want := DistributionBaseURL + "/" + PinnedVersion + "/windows/sonarqube-cli-" + PinnedVersion + "-windows-x86-64.exe"
+	if win != want {
+		t.Errorf("windows url got %s, want %s", win, want)
+	}
+	if ArtifactExt("windows-x86-64") != ".exe" || ArtifactExt("linux-x86-64") != ".bin" {
+		t.Fatal("ArtifactExt")
+	}
+	if ExeSuffix("windows") != ".exe" || ExeSuffix("linux") != "" {
+		t.Fatal("ExeSuffix")
+	}
+	if got := (&Bundle{Version: PinnedVersion, Platform: "linux-x86-64"}).FileName(); got != "sonar-"+PinnedVersion {
+		t.Errorf("linux FileName %s", got)
+	}
+	if got := (&Bundle{Version: PinnedVersion, Platform: "windows-x86-64"}).FileName(); got != "sonar-"+PinnedVersion+".exe" {
+		t.Errorf("windows FileName %s", got)
 	}
 }
 
