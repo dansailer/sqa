@@ -106,14 +106,31 @@ Proposed change: <short description or diff, if fixing>
 Do you approve this? (yes / no / different verdict)
 ```
 
+If the finding is in test code (tests, fixtures, helpers), consider whether it
+matters there (hardcoded credentials in fixtures or weak crypto/random in helpers
+often do not). You may recommend **accept**, or that the user exclude those paths
+(`sonar.tests`/`sonar.test.inclusions`, `sonar.exclusions`, `sonar.issue.ignore.multicriteria`).
+Still recommend a fix when that code is shipped, shared, or reveals a real bug;
+never edit Sonar settings or exclusions without explicit approval.
+
 ## Fix loop
 
-1. Pick the highest-ranked finding the user approved for fixing.
-2. Use the brief from `sqa next` (or `sqa show <key>`) and the surrounding
-   code; make the smallest correct fix. Do not suppress the rule with comments
-   or annotations unless the user explicitly approved that.
-3. Run the project's tests and linters.
-4. Show the user the change.
-5. SonarQube only updates after a new analysis (CI or the user's usual scan).
-   After it runs, verify with `sqa show <key>` or `sqa findings`.
-6. Run `sqa next` again and present that finding before touching it.
+1. Pick the highest-ranked finding the user approved for fixing. Branch from the
+   up-to-date default branch (e.g. `sonar/<rule>-<key>`, lowercased and sanitized);
+   never stack on a previous fix branch. One finding per branch/PR unless the user
+   explicitly approved grouping those findings. Ask before creating the branch,
+   pushing or opening the PR (a visible write), unless the fix approval already
+   included that.
+2. Use the brief from `sqa next` (or `sqa show <key>`) and the surrounding code;
+   make the smallest correct fix. Do not suppress the rule with comments or
+   annotations unless the user explicitly approved that. Commit only that fix
+   (plus any test change for it). Message and PR title: Conventional Commits
+   `<type>(<scope>): <summary>`, usually `fix` (security or bugs), `refactor`/`style`
+   for maintainability smells, or `test` if only tests change; include the rule key,
+   e.g. `fix(security): use parameterized query in getUser (go:S3649)`. PR body:
+   key, rule, location, short why, what changed, tests run.
+3. Run the project's tests and linters. Show the user the change, then open the PR
+   with the harness's normal git/forge tooling. Never merge it yourself.
+4. SonarQube only updates after a new analysis (CI or the user's usual scan). After
+   it runs, verify with `sqa show <key>` or `sqa findings`. Return to the default
+   branch, run `sqa next`, and present that finding before touching it.
