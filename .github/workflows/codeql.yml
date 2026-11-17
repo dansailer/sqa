@@ -66,3 +66,15 @@ jobs:
         uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           category: /language:go
+          # Code scanning (the Security tab) is not available on private
+          # user-owned repos, so keep the SARIF as an artifact there instead.
+          upload: ${{ github.event.repository.private && 'never' || 'always' }}
+          output: sarif-results
+
+      - name: Upload SARIF artifact
+        if: ${{ github.event.repository.private }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: codeql-sarif
+          path: sarif-results
+          retention-days: 30
