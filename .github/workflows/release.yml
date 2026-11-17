@@ -90,6 +90,17 @@ jobs:
       - name: Test embedded sonar (linux)
         run: go test -tags bundled_sonar ./internal/sonarcli/
 
+      # Licence texts of every Go module in sqa (and of Go itself) for both
+      # archives; fails if a module ships no licence file.
+      - name: Collect Go licence files
+        run: mise run go-licenses
+
+      # GPL-3.0 §6(d) (via LGPL-3.0 §4): the corresponding source of the
+      # bundled sonar is offered from the same place as the binaries. Verified
+      # against the SHA-256 pinned in mise.toml; dist/*.tar.gz picks it up below.
+      - name: Fetch and verify sonar source
+        run: mise run fetch-sonar-source
+
       - name: Build and package linux/amd64
         env:
           TAG: ${{ github.ref_name }}
@@ -102,6 +113,8 @@ jobs:
           mv sqa "build/${name}/sqa"
           cp LICENSE README.md THIRD_PARTY_NOTICES.md "build/${name}/"
           cp licenses/sonarqube-cli-LGPL-3.0.txt licenses/sonarqube-cli-GPL-3.0.txt "build/${name}/licenses/"
+          cp -R build/licenses/go "build/${name}/licenses/go"
+          test -s "build/${name}/licenses/go/MODULES.txt"
           # Smoke test: the bundled sonar extracts, verifies and runs.
           home="$(mktemp -d)"
           HOME="${home}" "build/${name}/sqa" version
@@ -126,6 +139,8 @@ jobs:
           mv sqa.exe "build/${name}/sqa.exe"
           cp LICENSE README.md THIRD_PARTY_NOTICES.md "build/${name}/"
           cp licenses/sonarqube-cli-LGPL-3.0.txt licenses/sonarqube-cli-GPL-3.0.txt "build/${name}/licenses/"
+          cp -R build/licenses/go "build/${name}/licenses/go"
+          test -s "build/${name}/licenses/go/MODULES.txt"
           # No smoke test: this is a Windows binary cross-compiled on Linux.
           python3 - "$name" <<'PY'
           import sys
@@ -192,6 +207,8 @@ jobs:
         working-directory: dist
         run: |
           set -euo pipefail
+          # *.tar.gz includes sonarqube-cli-<version>-source.tar.gz; never publish without it.
+          ls sonarqube-cli-*-source.tar.gz
           sha256sum -- *.tar.gz *.zip sqa_sbom.spdx.json > checksums.txt
           cat checksums.txt
 

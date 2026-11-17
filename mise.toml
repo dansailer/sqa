@@ -18,6 +18,10 @@ idiomatic_version_file_enable_tools = ["go"]
 [vars]
 sonar_bin = "internal/sonarcli/bundled/sonar-linux-amd64"
 sonar_bin_windows = "internal/sonarcli/bundled/sonar-windows-amd64.exe"
+# SHA-256 of GitHub's tag archive of the sonar CLI source for PinnedVersion
+# (https://github.com/SonarSource/sonarqube-cli/archive/refs/tags/<version>.tar.gz).
+# Update it together with PinnedVersion in internal/sonarcli/install.go.
+sonar_source_sha256 = "0d714bbefe108de876aa5a8af4b21c504a4b93e849c95a5eddb9c59d5648836d"
 ldflags = '-s -w -X github.com/dansailer/sqa/internal/cli.version=${VERSION:-dev} -X github.com/dansailer/sqa/internal/cli.commit=${COMMIT:-$(git rev-parse HEAD 2>/dev/null)}'
 
 [tasks.build]
@@ -32,6 +36,30 @@ run = "go run ./tools/fetch-sonar -os linux -arch amd64 -o {{vars.sonar_bin}}"
 [tasks.fetch-sonar-windows]
 description = "Download the pinned sonar for windows/amd64 and verify its SHA-256"
 run = "go run ./tools/fetch-sonar -os windows -arch amd64 -o {{vars.sonar_bin_windows}}"
+
+[tasks.fetch-sonar-source]
+description = "Download the sonar CLI source for the pinned version (GPL-3 §6(d)) to dist/ and verify its SHA-256"
+run = """
+set -eu
+version="$(go run ./tools/fetch-sonar -print-version)"
+want="{{vars.sonar_source_sha256}}"
+out="dist/sonarqube-cli-${version}-source.tar.gz"
+mkdir -p dist
+curl -fsSL --proto '=https' --max-time 120 -o "${out}.tmp" \
+  "https://github.com/SonarSource/sonarqube-cli/archive/refs/tags/${version}.tar.gz"
+got="$(sha256sum "${out}.tmp" | cut -d' ' -f1)"
+if [ "${got}" != "${want}" ]; then
+  rm -f "${out}.tmp"
+  echo "fetch-sonar-source: sha256 ${got} does not match pinned ${want}" >&2
+  exit 1
+fi
+mv "${out}.tmp" "${out}"
+echo "${out}: sha256 ${got} verified"
+"""
+
+[tasks.go-licenses]
+description = "Copy the licence files of all Go modules in sqa (and Go itself) to build/licenses/go"
+run = "go run ./tools/go-licenses -o build/licenses/go"
 
 [tasks.sonar-version]
 description = "Print the pinned sonar version"
@@ -99,6 +127,6 @@ description = "Remove built binaries and fetched sonar binaries"
 run = "rm -f sqa sqa.exe {{vars.sonar_bin}} {{vars.sonar_bin_windows}}"
 
 [tasks.all]
-description = "test, test-install, lint-sh, then linux and windows builds"
+description = "test, test-install, lint-sh, go-licenses, then linux and windows builds"
 depends = ["test"]
-run = [{ task = "test-install" }, { task = "lint-sh" }, { task = "build" }, { task = "vet-windows" }, { task = "build-windows" }]
+run = [{ task = "test-install" }, { task = "lint-sh" }, { task = "go-licenses" }, { task = "build" }, { task = "vet-windows" }, { task = "build-windows" }]

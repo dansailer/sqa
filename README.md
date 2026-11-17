@@ -16,6 +16,9 @@ decision**.
 - Ships a harness-neutral `SKILL.md` that teaches agents the triage order and the
   human-in-the-loop rule.
 
+> `sqa` is not a SonarSource product and is not affiliated with or endorsed by
+> SonarSource; SonarQube and SonarSource are trademarks of SonarSource SA.
+
 ## Why sqa and not just `sonar`?
 
 `sonar` 1.12 can technically do all of this via `sonar list issues` and
@@ -280,13 +283,17 @@ mise run vulncheck          # govulncheck
 mise run fetch-sonar        # download + verify the pinned sonar (linux/amd64)
 mise run test-bundled       # vet + tests with -tags bundled_sonar
 mise run build-bundled      # ./sqa with sonar embedded (VERSION=… COMMIT=… optional)
+mise run go-licenses        # Go module licence files -> build/licenses/go
+mise run fetch-sonar-source # pinned sonar source tarball -> dist/ (verified)
 ```
 
 Tests run against a fake `sonar` script and recorded SonarQube responses in
 `testdata/fake/`. Releases are cut by pushing a `v*` tag. The release workflow
 fetches and verifies `sonar`, builds linux/amd64 with `-tags bundled_sonar`
-(`CGO_ENABLED=0`, `-trimpath`, version injected with `-ldflags`), packages it
-as `tar.gz`, and publishes it with `gh release create`. A weekly workflow
+(`CGO_ENABLED=0`, `-trimpath`, version injected with `-ldflags`) and
+windows/amd64 the same way, packages them as `tar.gz` and `zip` with the
+licence files, attaches the verified `sonar` source tarball, and publishes
+everything with `gh release create`. A weekly workflow
 (`sonar-update.yml`) checks SonarSource's `stable.version` and opens an issue
 when a newer `sonar` is available.
 
@@ -295,6 +302,12 @@ See [DESIGN.md](DESIGN.md) for the design.
 ## License
 
 `sqa` is MIT licensed. The bundled `sonar` CLI is SonarSource's, licensed under
-LGPL-3.0 and redistributed unmodified; see
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for its source, checksum and
+LGPL-3.0 and redistributed unmodified. Each release attaches the matching
+`sonar` source (`sonarqube-cli-<version>-source.tar.gz`), and each archive
+carries the licence texts of `sonar` and of the Go modules in `sqa`
+(`licenses/`). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the
+components inside `sonar` (Bun, JavaScriptCore, npm packages), checksums and
 how to replace it with your own build (`sonar.path`).
+
+`sqa` is not a SonarSource product and is not affiliated with or endorsed by
+SonarSource; SonarQube and SonarSource are trademarks of SonarSource SA.

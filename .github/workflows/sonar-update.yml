@@ -93,8 +93,9 @@ jobs:
           To update, after reviewing the upstream changes:
 
           1. Set \`PinnedVersion\` and the \`pinnedChecksums\` entries in \`internal/sonarcli/install.go\` (verify each digest independently against the \`.sha256\` files).
-          2. Update version, URL and SHA-256 in \`THIRD_PARTY_NOTICES.md\` (a test enforces this).
-          3. \`mise run test-bundled\` and \`mise run build-bundled\`, then test \`sqa doctor\` against the SonarQube server.
+          2. Update version, URL and SHA-256 in \`THIRD_PARTY_NOTICES.md\` (a test enforces this), including the Bun version and the npm package list of the new release.
+          3. Set \`sonar_source_sha256\` in \`mise.toml\` to the SHA-256 of https://github.com/SonarSource/sonarqube-cli/archive/refs/tags/${LATEST}.tar.gz and update the source tarball row in \`THIRD_PARTY_NOTICES.md\`.
+          4. \`mise run test-bundled\` and \`mise run build-bundled\`, then test \`sqa doctor\` against the SonarQube server.
 
           Opened automatically by the sonar-update workflow. No code or binaries were changed.
           MD

@@ -1,4 +1,4 @@
-# sqa — SonarQube Agent CLI: Design
+# sqa: Design
 
 Status: Implemented in v0.1.0 · Date: 2026-11-17 · Owner: Dan Sailer
 
