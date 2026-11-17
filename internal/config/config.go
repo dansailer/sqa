@@ -1,5 +1,6 @@
 // Package config loads the optional sqa configuration file and resolves the
-// well-known directories sqa uses. The file never contains secrets.
+// well-known directories sqa uses. config.yaml never contains secrets; the
+// token file next to it (credentials.json) is written by sonar, not by sqa.
 package config
 
 import (
@@ -16,8 +17,20 @@ import (
 // Config is the content of ~/.config/sqa/config.yaml. All fields are optional.
 type Config struct {
 	DefaultProject string `yaml:"default_project"`
+	Auth           Auth   `yaml:"auth"`
 	Sonar          Sonar  `yaml:"sonar"`
 	Skills         Skills `yaml:"skills"`
+}
+
+// Auth selects where sonar keeps the token from `sqa auth login`.
+type Auth struct {
+	// Store is "file" (default: a 0600 JSON file, like terraform or oc) or
+	// "keychain" (the OS keychain; on Linux that needs libsecret and a
+	// running Secret Service such as gnome-keyring).
+	Store string `yaml:"store"`
+	// CredentialsFile overrides the token file (default
+	// $XDG_CONFIG_HOME/sqa/credentials.json).
+	CredentialsFile string `yaml:"credentials_file"`
 }
 
 // Sonar configures the official SonarSource CLI that sqa wraps.
@@ -27,6 +40,9 @@ type Sonar struct {
 	Version string `yaml:"version"`
 	// Path points at a sonar binary to use instead of the managed one.
 	Path string `yaml:"path"`
+	// Home is sonar's SONAR_USER_HOME (default $XDG_DATA_HOME/sqa/sonar-home),
+	// kept separate from ~/.sonar so a standalone sonar's state never leaks in.
+	Home string `yaml:"home"`
 }
 
 // Skills configures `sqa skill install`.
@@ -85,6 +101,18 @@ func SonarBinDir() (string, error) {
 	return filepath.Join(d, "bin"), err
 }
 
+// CredentialsFile is the default token file for the file store.
+func CredentialsFile() (string, error) {
+	d, err := ConfigDir()
+	return filepath.Join(d, "credentials.json"), err
+}
+
+// SonarHome is the default SONAR_USER_HOME sqa gives sonar.
+func SonarHome() (string, error) {
+	d, err := DataDir()
+	return filepath.Join(d, "sonar-home"), err
+}
+
 // Path returns the config file path, honouring SQA_CONFIG.
 func Path() (string, error) {
 	if p := os.Getenv("SQA_CONFIG"); p != "" {
@@ -116,13 +144,15 @@ func LoadFile(p string) (*Config, error) {
 	if err := yaml.Unmarshal(b, c); err != nil {
 		return nil, fmt.Errorf("parse config %s: %w", p, err)
 	}
-	c.Sonar.Path, err = ExpandHome(c.Sonar.Path)
-	if err != nil {
-		return nil, err
+	for _, f := range []*string{&c.Sonar.Path, &c.Sonar.Home, &c.Skills.DefaultDir, &c.Auth.CredentialsFile} {
+		if *f, err = ExpandHome(*f); err != nil {
+			return nil, err
+		}
 	}
-	c.Skills.DefaultDir, err = ExpandHome(c.Skills.DefaultDir)
-	if err != nil {
-		return nil, err
+	switch c.Auth.Store {
+	case "", "file", "keychain":
+	default:
+		return nil, fmt.Errorf("config %s: auth.store %q: want file or keychain", p, c.Auth.Store)
 	}
 	return c, nil
 }

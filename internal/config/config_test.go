@@ -50,3 +50,37 @@ func TestXDGOverrides(t *testing.T) {
 		t.Fatalf("got %s", s)
 	}
 }
+
+func TestLoadAuthAndSonarHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	data := "auth:\n  store: keychain\n  credentials_file: ~/creds.json\nsonar:\n  home: ~/sh\n"
+	if err := os.WriteFile(p, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := LoadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Auth.Store != "keychain" || c.Auth.CredentialsFile != filepath.Join(home, "creds.json") || c.Sonar.Home != filepath.Join(home, "sh") {
+		t.Fatalf("unexpected %+v", c)
+	}
+	if err := os.WriteFile(p, []byte("auth:\n  store: vault\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadFile(p); err == nil {
+		t.Fatal("unknown auth.store accepted")
+	}
+}
+
+func TestDefaultTokenPaths(t *testing.T) {
+	d := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(d, "c"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(d, "d"))
+	c, _ := CredentialsFile()
+	h, _ := SonarHome()
+	if c != filepath.Join(d, "c", "sqa", "credentials.json") || h != filepath.Join(d, "d", "sqa", "sonar-home") {
+		t.Fatalf("got %s %s", c, h)
+	}
+}
