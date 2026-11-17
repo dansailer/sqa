@@ -1,0 +1,20 @@
+{
+  "rule": {
+    "key": "go:S3649",
+    "repo": "go",
+    "name": "Database queries should not be vulnerable to injection attacks",
+    "severity": "BLOCKER",
+    "status": "READY",
+    "type": "VULNERABILITY",
+    "lang": "go",
+    "langName": "Go",
+    "descriptionSections": [
+      {"key": "root_cause", "content": "<p>Database injections (such as SQL injections) occur when an application builds queries from untrusted data &amp; executes them.</p>"},
+      {"key": "how_to_fix", "content": "<p>Use parameterized queries:</p><pre>db.Query(\"SELECT * FROM users WHERE id = ?\", id)</pre>"},
+      {"key": "resources", "content": "<ul><li>OWASP Top 10 A03</li></ul>"}
+    ],
+    "impacts": [{"softwareQuality": "SECURITY", "severity": "BLOCKER"}],
+    "cleanCodeAttribute": "COMPLETE"
+  },
+  "actives": []
+}

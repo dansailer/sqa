@@ -1,0 +1,348 @@
+package sonarcli
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/url"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+)
+
+// Version returns the sonar CLI version (e.g. "1.12.0").
+func (r *Runner) Version(ctx context.Context) (string, error) {
+	out, _, err := r.Run(ctx, "--version")
+	if err != nil {
+		return "", err
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	return strings.TrimPrefix(strings.TrimSpace(lines[len(lines)-1]), "v"), nil
+}
+
+// AuthStatus is the JSON printed by `sonar auth status --format json`.
+type AuthStatus struct {
+	Status  string `json:"status"`
+	Server  string `json:"server,omitempty"`
+	Org     string `json:"org,omitempty"`
+	Source  string `json:"source,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+// Connected reports whether sonar has a working connection.
+func (a AuthStatus) Connected() bool { return a.Status == "connected" }
+
+// AuthStatus runs `sonar auth status --format json`. sonar exits 1 for any
+// non-connected state but still prints the JSON object, so a parseable body
+// is returned without error.
+func (r *Runner) AuthStatus(ctx context.Context) (AuthStatus, error) {
+	out, _, err := r.Run(ctx, "auth", "status", "--format", "json")
+	var st AuthStatus
+	if jerr := json.Unmarshal(out, &st); jerr == nil && st.Status != "" {
+		return st, nil
+	}
+	if err != nil {
+		return st, err
+	}
+	return st, fmt.Errorf("unexpected output from sonar auth status: %q", truncate(string(out), 200))
+}
+
+// APIGet runs `sonar api get <path>` and returns the response body.
+func (r *Runner) APIGet(ctx context.Context, path string, query url.Values) ([]byte, error) {
+	out, _, err := r.Run(ctx, "api", "get", withQuery(path, query))
+	return out, err
+}
+
+// APIPost runs `sonar api post <path> --data <json>`. sonar sends the JSON
+// object as form data for /api/ (v1) endpoints.
+func (r *Runner) APIPost(ctx context.Context, path string, data map[string]string) ([]byte, error) {
+	b, err := json.Marshal(data)
+	if err != nil {
+		return nil, err
+	}
+	out, _, err := r.Run(ctx, "api", "post", path, "--data", string(b))
+	return out, err
+}
+
+func withQuery(path string, q url.Values) string {
+	if len(q) == 0 {
+		return path
+	}
+	return path + "?" + q.Encode()
+}
+
+// ListIssuesOptions maps to `sonar list issues` flags.
+type ListIssuesOptions struct {
+	Project     string
+	Branch      string
+	PullRequest string
+	File        string
+	NewCode     bool
+	Statuses    []string
+	Severities  []string
+	PageSize    int
+	Page        int
+}
+
+// Args renders the options as sonar arguments.
+func (o ListIssuesOptions) Args() []string {
+	args := []string{"list", "issues", "--format", "json"}
+	add := func(flag, v string) {
+		if v != "" {
+			args = append(args, flag, v)
+		}
+	}
+	add("--project", o.Project)
+	add("--branch", o.Branch)
+	add("--pull-request", o.PullRequest)
+	add("--file", o.File)
+	add("--statuses", strings.Join(o.Statuses, ","))
+	add("--severities", strings.Join(o.Severities, ","))
+	if o.NewCode {
+		args = append(args, "--new-code")
+	}
+	if o.PageSize > 0 {
+		args = append(args, "--page-size", strconv.Itoa(o.PageSize))
+	}
+	if o.Page > 0 {
+		args = append(args, "--page", strconv.Itoa(o.Page))
+	}
+	return args
+}
+
+// Detected holds what sonar auto-detected and announced on stderr.
+type Detected struct {
+	Project     string
+	PullRequest string
+}
+
+var (
+	reProject = regexp.MustCompile(`Using auto-detected project key:\s*(\S+)`)
+	rePR      = regexp.MustCompile(`Using pull request\s+(\S+)\s+\(auto-detected`)
+)
+
+// ParseDetected extracts auto-detected project / PR from sonar stderr.
+func ParseDetected(stderr []byte) Detected {
+	var d Detected
+	if m := reProject.FindSubmatch(stderr); m != nil {
+		d.Project = strings.Trim(string(m[1]), "'\"`.")
+	}
+	if m := rePR.FindSubmatch(stderr); m != nil {
+		d.PullRequest = strings.Trim(string(m[1]), "'\"`.")
+	}
+	return d
+}
+
+// maxIssuePages caps pagination (SonarQube refuses results past 10 000).
+const maxIssuePages = 20
+
+// ListIssues runs `sonar list issues --format json`, following pagination
+// until all results (or limit, when > 0) are collected.
+func (r *Runner) ListIssues(ctx context.Context, o ListIssuesOptions, limit int) ([]Issue, []Component, Detected, error) {
+	var (
+		issues []Issue
+		comps  []Component
+		det    Detected
+	)
+	if o.PageSize == 0 {
+		o.PageSize = 500
+	}
+	for page := 1; page <= maxIssuePages; page++ {
+		o.Page = page
+		out, stderr, err := r.Run(ctx, o.Args()...)
+		if err != nil {
+			return nil, nil, det, err
+		}
+		if page == 1 {
+			det = ParseDetected(stderr)
+			if o.Project == "" && det.Project != "" {
+				o.Project = det.Project
+			}
+			if o.PullRequest == "" && o.Branch == "" && det.PullRequest != "" {
+				o.PullRequest = det.PullRequest
+			}
+		}
+		var resp IssuesSearchResponse
+		if err := json.Unmarshal(out, &resp); err != nil {
+			return nil, nil, det, fmt.Errorf("parse sonar list issues output: %w", err)
+		}
+		issues = append(issues, resp.Issues...)
+		comps = append(comps, resp.Components...)
+		total := resp.Total
+		if resp.Paging.Total > 0 {
+			total = resp.Paging.Total
+		}
+		if len(resp.Issues) == 0 || len(issues) >= total || (limit > 0 && len(issues) >= limit) {
+			break
+		}
+	}
+	return issues, comps, det, nil
+}
+
+// SearchHotspotsOptions maps to /api/hotspots/search parameters.
+type SearchHotspotsOptions struct {
+	Project     string
+	Branch      string
+	PullRequest string
+	Files       []string
+	NewCode     bool
+	Status      string
+}
+
+// SearchHotspots calls /api/hotspots/search through `sonar api get`, following
+// pagination.
+func (r *Runner) SearchHotspots(ctx context.Context, o SearchHotspotsOptions, limit int) ([]Hotspot, []Component, error) {
+	var (
+		hs    []Hotspot
+		comps []Component
+	)
+	for page := 1; page <= maxIssuePages; page++ {
+		q := url.Values{}
+		q.Set("project", o.Project)
+		setIf(q, "branch", o.Branch)
+		setIf(q, "pullRequest", o.PullRequest)
+		setIf(q, "status", o.Status)
+		if len(o.Files) > 0 {
+			q.Set("files", strings.Join(o.Files, ","))
+		}
+		if o.NewCode {
+			q.Set("inNewCodePeriod", "true")
+		}
+		q.Set("ps", "500")
+		q.Set("p", strconv.Itoa(page))
+		out, err := r.APIGet(ctx, "/api/hotspots/search", q)
+		if err != nil {
+			return nil, nil, err
+		}
+		var resp HotspotsSearchResponse
+		if err := json.Unmarshal(out, &resp); err != nil {
+			return nil, nil, fmt.Errorf("parse /api/hotspots/search: %w", err)
+		}
+		hs = append(hs, resp.Hotspots...)
+		comps = append(comps, resp.Components...)
+		if len(resp.Hotspots) == 0 || len(hs) >= resp.Paging.Total || (limit > 0 && len(hs) >= limit) {
+			break
+		}
+	}
+	return hs, comps, nil
+}
+
+// GetIssue fetches a single issue by key via /api/issues/search?issues=KEY.
+// It returns (nil, nil) when no issue has that key.
+func (r *Runner) GetIssue(ctx context.Context, key string) (*Issue, []Component, error) {
+	q := url.Values{}
+	q.Set("issues", key)
+	q.Set("additionalFields", "_all")
+	out, err := r.APIGet(ctx, "/api/issues/search", q)
+	if err != nil {
+		return nil, nil, err
+	}
+	var resp IssuesSearchResponse
+	if err := json.Unmarshal(out, &resp); err != nil {
+		return nil, nil, fmt.Errorf("parse /api/issues/search: %w", err)
+	}
+	for i := range resp.Issues {
+		if resp.Issues[i].Key == key {
+			return &resp.Issues[i], resp.Components, nil
+		}
+	}
+	return nil, nil, nil
+}
+
+// ShowHotspot calls /api/hotspots/show. A 404 from the server surfaces as a
+// sonar error.
+func (r *Runner) ShowHotspot(ctx context.Context, key string) (*HotspotDetail, error) {
+	q := url.Values{}
+	q.Set("hotspot", key)
+	out, err := r.APIGet(ctx, "/api/hotspots/show", q)
+	if err != nil {
+		return nil, err
+	}
+	var h HotspotDetail
+	if err := json.Unmarshal(out, &h); err != nil {
+		return nil, fmt.Errorf("parse /api/hotspots/show: %w", err)
+	}
+	return &h, nil
+}
+
+// ShowRule calls /api/rules/show.
+func (r *Runner) ShowRule(ctx context.Context, key string) (*Rule, error) {
+	q := url.Values{}
+	q.Set("key", key)
+	out, err := r.APIGet(ctx, "/api/rules/show", q)
+	if err != nil {
+		return nil, err
+	}
+	var resp struct {
+		Rule Rule `json:"rule"`
+	}
+	if err := json.Unmarshal(out, &resp); err != nil {
+		return nil, fmt.Errorf("parse /api/rules/show: %w", err)
+	}
+	return &resp.Rule, nil
+}
+
+// SourceLines calls /api/sources/lines for [from, to].
+func (r *Runner) SourceLines(ctx context.Context, component string, from, to int, branch, pr string) ([]SourceLine, error) {
+	q := url.Values{}
+	q.Set("key", component)
+	q.Set("from", strconv.Itoa(from))
+	q.Set("to", strconv.Itoa(to))
+	setIf(q, "branch", branch)
+	setIf(q, "pullRequest", pr)
+	out, err := r.APIGet(ctx, "/api/sources/lines", q)
+	if err != nil {
+		return nil, err
+	}
+	var resp struct {
+		Sources []SourceLine `json:"sources"`
+	}
+	if err := json.Unmarshal(out, &resp); err != nil {
+		return nil, fmt.Errorf("parse /api/sources/lines: %w", err)
+	}
+	sort.Slice(resp.Sources, func(i, j int) bool { return resp.Sources[i].Line < resp.Sources[j].Line })
+	return resp.Sources, nil
+}
+
+// ServerVersion calls /api/server/version (plain-text body).
+func (r *Runner) ServerVersion(ctx context.Context) (string, error) {
+	out, err := r.APIGet(ctx, "/api/server/version", nil)
+	if err != nil {
+		return "", err
+	}
+	return strings.Trim(strings.TrimSpace(string(out)), `"`), nil
+}
+
+// TransitionIssue calls /api/issues/do_transition.
+func (r *Runner) TransitionIssue(ctx context.Context, key, transition string) error {
+	_, err := r.APIPost(ctx, "/api/issues/do_transition", map[string]string{"issue": key, "transition": transition})
+	return err
+}
+
+// CommentIssue calls /api/issues/add_comment.
+func (r *Runner) CommentIssue(ctx context.Context, key, text string) error {
+	_, err := r.APIPost(ctx, "/api/issues/add_comment", map[string]string{"issue": key, "text": text})
+	return err
+}
+
+// ReviewHotspot calls /api/hotspots/change_status with status REVIEWED.
+func (r *Runner) ReviewHotspot(ctx context.Context, key, resolution, comment string) error {
+	_, err := r.APIPost(ctx, "/api/hotspots/change_status", map[string]string{
+		"hotspot": key, "status": "REVIEWED", "resolution": resolution, "comment": comment,
+	})
+	return err
+}
+
+func setIf(q url.Values, k, v string) {
+	if v != "" {
+		q.Set(k, v)
+	}
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
+}

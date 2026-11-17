@@ -1,0 +1,7 @@
+{
+  "sources": [
+    {"line": 22, "code": "func <span class=\"k\">getUser</span>(w http.ResponseWriter, r *http.Request) {", "isNew": false},
+    {"line": 27, "code": "\tq := fmt.Sprintf(&quot;SELECT * FROM users WHERE id = %s&quot;, id)", "isNew": true},
+    {"line": 28, "code": "\trows, _ := db.Query(q)", "isNew": true}
+  ]
+}

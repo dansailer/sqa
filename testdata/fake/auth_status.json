@@ -1,0 +1,5 @@
+{
+  "status": "connected",
+  "server": "https://sonarqube.example.com",
+  "source": "keychain"
+}

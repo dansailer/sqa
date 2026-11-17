@@ -1,0 +1,26 @@
+{
+  "total": 1, "p": 1, "ps": 100,
+  "paging": {"pageIndex": 1, "pageSize": 100, "total": 1},
+  "issues": [
+    {
+      "key": "AX-VULN",
+      "rule": "go:S3649",
+      "severity": "BLOCKER",
+      "component": "demo:internal/api/users.go",
+      "project": "demo",
+      "line": 27,
+      "textRange": {"startLine": 27, "endLine": 28, "startOffset": 1, "endOffset": 40},
+      "flows": [{"locations": [{"component": "demo:internal/api/users.go", "textRange": {"startLine": 20, "endLine": 20, "startOffset": 5, "endOffset": 30}, "msg": "Source: user-controlled data"}]}],
+      "status": "OPEN",
+      "message": "Change this code to not construct SQL queries directly from user-controlled data.",
+      "type": "VULNERABILITY",
+      "impacts": [{"softwareQuality": "SECURITY", "severity": "BLOCKER"}],
+      "issueStatus": "OPEN",
+      "transitions": ["confirm", "resolve", "falsepositive", "accept"],
+      "ruleDescriptionContextKey": ""
+    }
+  ],
+  "components": [
+    {"key": "demo:internal/api/users.go", "qualifier": "FIL", "name": "users.go", "longName": "internal/api/users.go", "path": "internal/api/users.go"}
+  ]
+}

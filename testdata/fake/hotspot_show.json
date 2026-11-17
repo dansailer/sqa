@@ -1,0 +1,25 @@
+{
+  "key": "HS-1",
+  "component": {"key": "demo:internal/api/cors.go", "qualifier": "FIL", "name": "cors.go", "longName": "internal/api/cors.go", "path": "internal/api/cors.go"},
+  "project": {"key": "demo", "qualifier": "TRK", "name": "demo", "longName": "demo"},
+  "rule": {
+    "key": "go:S5122",
+    "name": "Having a permissive Cross-Origin Resource Sharing policy is security-sensitive",
+    "securityCategory": "insecure-conf",
+    "vulnerabilityProbability": "HIGH",
+    "riskDescription": "<p>Same origin policy in browsers prevents...</p>",
+    "vulnerabilityDescription": "<h2>Ask Yourself Whether</h2><ul><li>You don't trust the origin.</li></ul>",
+    "fixRecommendations": "<h2>Recommended Secure Coding Practices</h2><p>Allow only trusted origins.</p>"
+  },
+  "status": "TO_REVIEW",
+  "line": 9,
+  "hash": "abc",
+  "message": "Make sure this permissive CORS policy is safe here.",
+  "textRange": {"startLine": 9, "endLine": 9, "startOffset": 2, "endOffset": 40},
+  "changelog": [],
+  "comment": [],
+  "users": [],
+  "canChangeStatus": true,
+  "flows": [],
+  "messageFormattings": []
+}

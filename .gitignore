@@ -1,0 +1,5 @@
+/sqa
+/dist/
+/build/
+coverage.out
+*.test

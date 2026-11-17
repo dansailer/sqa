@@ -1,0 +1,26 @@
+version: "2"
+linters:
+  default: standard
+  enable:
+    - gosec
+    - misspell
+    - revive
+    - unconvert
+    - errorlint
+    - bodyclose
+  settings:
+    revive:
+      rules:
+        - name: exported
+          disabled: true
+        - name: package-comments
+  exclusions:
+    presets:
+      - std-error-handling
+    rules:
+      - path: _test\.go
+        linters: [gosec, errcheck, revive]
+formatters:
+  enable:
+    - gofmt
+    - goimports

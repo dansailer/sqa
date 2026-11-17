@@ -1,0 +1,61 @@
+#!/bin/sh
+# Fake `sonar` CLI for sqa tests. Serves recorded responses from $FAKE_SONAR_DIR
+# and logs every invocation (one argv per line, args separated by \x1f) to
+# $FAKE_SONAR_LOG.
+set -eu
+d="${FAKE_SONAR_DIR:?}"
+if [ -n "${FAKE_SONAR_LOG:-}" ]; then
+  printf '%s' "$1" >>"$FAKE_SONAR_LOG"
+  i=0
+  for a in "$@"; do
+    if [ $i -gt 0 ]; then printf '\037%s' "$a" >>"$FAKE_SONAR_LOG"; fi
+    i=$((i + 1))
+  done
+  printf '\n' >>"$FAKE_SONAR_LOG"
+fi
+case "$1" in
+  --version) echo "1.12.0"; exit 0 ;;
+  auth)
+    if [ "$2" = status ]; then cat "$d/auth_status.json"; exit "${FAKE_AUTH_EXIT:-0}"; fi
+    echo "auth $2 passthrough"; exit 0 ;;
+  list)
+    newcode=0; project=0
+    for a in "$@"; do
+      [ "$a" = "--new-code" ] && newcode=1
+      [ "$a" = "--project" ] && project=1
+    done
+    if [ $project -eq 0 ]; then
+      if [ -n "${FAKE_NO_PROJECT:-}" ]; then
+        printf '%s\n' "Could not determine project key." "  -> Use --project <key>, or run 'sonar link <projectKey>'" >&2
+        exit 1
+      fi
+      echo "Using auto-detected project key: demo" >&2
+    fi
+    if [ $newcode -eq 1 ]; then cat "$d/issues_newcode.json"; else cat "$d/issues.json"; fi
+    exit 0 ;;
+  api)
+    method="$2"; path="$3"
+    if [ "$method" = post ]; then
+      if [ -n "${FAKE_POST_FAIL:-}" ]; then echo "SonarQube API error: 403 - forbidden" >&2; exit 1; fi
+      exit 0
+    fi
+    case "$path" in
+      /api/server/version*) cat "$d/server_version.txt" ;;
+      /api/hotspots/search*inNewCodePeriod=true*) cat "$d/hotspots_newcode.json" ;;
+      /api/hotspots/search*) cat "$d/hotspots.json" ;;
+      /api/hotspots/show*)
+        case "$path" in
+          *hotspot=HS-1*) cat "$d/hotspot_show.json" ;;
+          *) echo "SonarQube API error: 404 - {\"errors\":[{\"msg\":\"Hotspot not found\"}]}" >&2; exit 1 ;;
+        esac ;;
+      /api/issues/search*issues=AX-VULN*) cat "$d/issue_vuln.json" ;;
+      /api/issues/search*) echo '{"total":0,"p":1,"ps":100,"paging":{"pageIndex":1,"pageSize":100,"total":0},"issues":[],"components":[]}' ;;
+      /api/rules/show*) cat "$d/rule_show.json" ;;
+      /api/sources/lines*) cat "$d/sources_lines.json" ;;
+      *) echo "SonarQube API error: 404 - unknown $path" >&2; exit 1 ;;
+    esac
+    exit 0 ;;
+  integrate) echo "integrate must never be called" >&2; exit 99 ;;
+esac
+echo "fake sonar: unsupported args: $*" >&2
+exit 2

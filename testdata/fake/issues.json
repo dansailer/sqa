@@ -1,0 +1,74 @@
+{
+  "total": 4,
+  "p": 1,
+  "ps": 500,
+  "paging": {"pageIndex": 1, "pageSize": 500, "total": 4},
+  "effortTotal": 95,
+  "issues": [
+    {
+      "key": "AX-SMELL",
+      "rule": "go:S1192",
+      "severity": "CRITICAL",
+      "component": "demo:internal/util/strings.go",
+      "project": "demo",
+      "line": 12,
+      "textRange": {"startLine": 12, "endLine": 12, "startOffset": 2, "endOffset": 20},
+      "flows": [],
+      "status": "OPEN",
+      "message": "Define a constant instead of duplicating this literal \"application/json\" 4 times.",
+      "effort": "10min",
+      "type": "CODE_SMELL",
+      "scope": "MAIN",
+      "cleanCodeAttribute": "DISTINCT",
+      "cleanCodeAttributeCategory": "ADAPTABLE",
+      "impacts": [{"softwareQuality": "MAINTAINABILITY", "severity": "HIGH"}],
+      "issueStatus": "OPEN"
+    },
+    {
+      "key": "AX-BUG",
+      "rule": "go:S1145",
+      "severity": "MAJOR",
+      "component": "demo:cmd/server/main.go",
+      "project": "demo",
+      "line": 40,
+      "status": "OPEN",
+      "message": "Remove this useless \"if\" statement.",
+      "type": "BUG",
+      "impacts": [{"softwareQuality": "RELIABILITY", "severity": "MEDIUM"}],
+      "issueStatus": "OPEN"
+    },
+    {
+      "key": "AX-VULN-OLD",
+      "rule": "go:S2077",
+      "severity": "MAJOR",
+      "component": "demo:internal/db/query.go",
+      "project": "demo",
+      "line": 88,
+      "status": "OPEN",
+      "message": "Make sure using a dynamically formatted SQL query is safe here.",
+      "type": "VULNERABILITY",
+      "impacts": [{"softwareQuality": "SECURITY", "severity": "HIGH"}],
+      "issueStatus": "CONFIRMED"
+    },
+    {
+      "key": "AX-VULN",
+      "rule": "go:S3649",
+      "severity": "BLOCKER",
+      "component": "demo:internal/api/users.go",
+      "project": "demo",
+      "line": 27,
+      "textRange": {"startLine": 27, "endLine": 28, "startOffset": 1, "endOffset": 40},
+      "flows": [{"locations": [{"component": "demo:internal/api/users.go", "textRange": {"startLine": 20, "endLine": 20, "startOffset": 5, "endOffset": 30}, "msg": "Source: user-controlled data"}]}],
+      "status": "OPEN",
+      "message": "Change this code to not construct SQL queries directly from user-controlled data.",
+      "type": "VULNERABILITY",
+      "impacts": [{"softwareQuality": "SECURITY", "severity": "BLOCKER"}],
+      "issueStatus": "OPEN"
+    }
+  ],
+  "components": [
+    {"key": "demo", "enabled": true, "qualifier": "TRK", "name": "demo", "longName": "demo"},
+    {"key": "demo:internal/api/users.go", "enabled": true, "qualifier": "FIL", "name": "users.go", "longName": "internal/api/users.go", "path": "internal/api/users.go"}
+  ],
+  "facets": []
+}

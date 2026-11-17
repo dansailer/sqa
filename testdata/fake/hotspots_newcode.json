@@ -1,0 +1,1 @@
+{"paging": {"pageIndex": 1, "pageSize": 500, "total": 1}, "hotspots": [{"key": "HS-2", "component": "demo:internal/crypto/hash.go", "project": "demo", "vulnerabilityProbability": "LOW", "status": "TO_REVIEW", "line": 15, "message": "weak hash", "ruleKey": "go:S4790"}], "components": []}

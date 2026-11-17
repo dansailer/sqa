@@ -1,0 +1,22 @@
+{
+  "total": 1,
+  "p": 1,
+  "ps": 500,
+  "paging": {"pageIndex": 1, "pageSize": 500, "total": 1},
+  "issues": [
+    {
+      "key": "AX-BUG",
+      "rule": "go:S1145",
+      "severity": "MAJOR",
+      "component": "demo:cmd/server/main.go",
+      "project": "demo",
+      "line": 40,
+      "status": "OPEN",
+      "message": "Remove this useless \"if\" statement.",
+      "type": "BUG",
+      "impacts": [{"softwareQuality": "RELIABILITY", "severity": "MEDIUM"}],
+      "issueStatus": "OPEN"
+    }
+  ],
+  "components": []
+}

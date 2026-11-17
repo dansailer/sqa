@@ -1,0 +1,38 @@
+{
+  "paging": {"pageIndex": 1, "pageSize": 500, "total": 2},
+  "hotspots": [
+    {
+      "key": "HS-2",
+      "component": "demo:internal/crypto/hash.go",
+      "project": "demo",
+      "securityCategory": "weak-cryptography",
+      "vulnerabilityProbability": "LOW",
+      "status": "TO_REVIEW",
+      "line": 15,
+      "message": "Make sure this weak hash algorithm is not used in a sensitive context here.",
+      "author": "dev@example.com",
+      "creationDate": "2026-10-01T10:00:00+0000",
+      "updateDate": "2026-10-01T10:00:00+0000",
+      "textRange": {"startLine": 15, "endLine": 15, "startOffset": 8, "endOffset": 18},
+      "flows": [],
+      "ruleKey": "go:S4790",
+      "messageFormattings": []
+    },
+    {
+      "key": "HS-1",
+      "component": "demo:internal/api/cors.go",
+      "project": "demo",
+      "securityCategory": "insecure-conf",
+      "vulnerabilityProbability": "HIGH",
+      "status": "TO_REVIEW",
+      "line": 9,
+      "message": "Make sure this permissive CORS policy is safe here.",
+      "ruleKey": "go:S5122",
+      "flows": []
+    }
+  ],
+  "components": [
+    {"key": "demo:internal/api/cors.go", "qualifier": "FIL", "name": "cors.go", "longName": "internal/api/cors.go", "path": "internal/api/cors.go"},
+    {"key": "demo:internal/crypto/hash.go", "qualifier": "FIL", "name": "hash.go", "longName": "internal/crypto/hash.go", "path": "internal/crypto/hash.go"}
+  ]
+}
