@@ -71,6 +71,10 @@ jobs:
           mise run test -- -covermode=atomic -coverprofile=coverage.out
           go tool cover -func=coverage.out | tail -n 1
 
+      - name: Test install.sh
+        if: ${{ !cancelled() }}
+        run: mise run test-install
+
       - name: Build without bundled sonar
         if: ${{ !cancelled() }}
         run: |

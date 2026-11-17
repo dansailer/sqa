@@ -13,6 +13,7 @@ idiomatic_version_file_enable_tools = ["go"]
 
 [tools]
 "aqua:golangci/golangci-lint" = "2.15.0"
+"aqua:koalaman/shellcheck" = "0.11.0"
 
 [vars]
 sonar_bin = "internal/sonarcli/bundled/sonar-linux-amd64"
@@ -53,9 +54,17 @@ run = [
   "go test -race -tags bundled_sonar ./...",
 ]
 
+[tasks.lint-sh]
+description = "shellcheck install.sh and its tests"
+run = "shellcheck install.sh testdata/install/test.sh"
+
+[tasks.test-install]
+description = "Run install.sh against a local fake release (checksum mismatch included)"
+run = "sh testdata/install/test.sh"
+
 [tasks.lint]
-description = "go vet and golangci-lint"
-run = ["go vet ./...", "golangci-lint run"]
+description = "go vet, golangci-lint and shellcheck"
+run = ["go vet ./...", "golangci-lint run", { task = "lint-sh" }]
 
 [tasks.vulncheck]
 description = "Scan dependencies and code for known vulnerabilities (govulncheck)"
@@ -66,6 +75,6 @@ description = "Remove ./sqa and the fetched sonar binary"
 run = "rm -f sqa {{vars.sonar_bin}}"
 
 [tasks.all]
-description = "test, then build"
+description = "test, test-install, lint-sh, then build"
 depends = ["test"]
-run = [{ task = "build" }]
+run = [{ task = "test-install" }, { task = "lint-sh" }, { task = "build" }]
