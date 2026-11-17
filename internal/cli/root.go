@@ -195,13 +195,43 @@ func (a *app) resolveSonar() (*sonarcli.Resolved, error) {
 	return res, nil
 }
 
+// sonarEnv resolves the token store and sonar home sqa gives sonar.
+func (a *app) sonarEnv() (*sonarcli.Environment, error) {
+	creds, err := config.CredentialsFile()
+	if err != nil {
+		return nil, &ExitError{Code: ExitUsage, Err: err}
+	}
+	home, err := config.SonarHome()
+	if err != nil {
+		return nil, &ExitError{Code: ExitUsage, Err: err}
+	}
+	s := sonarcli.Settings{DefaultCredentialsFile: creds, DefaultSonarHome: home}
+	if a.cfg != nil {
+		s.Store, s.CredentialsFile, s.SonarHome = a.cfg.Auth.Store, a.cfg.Auth.CredentialsFile, a.cfg.Sonar.Home
+	}
+	env, err := sonarcli.ResolveEnvironment(os.Getenv, s)
+	if err != nil {
+		return nil, &ExitError{Code: ExitUsage, Err: err}
+	}
+	return env, nil
+}
+
+// newRunner returns a Runner for bin with sqa's sonar environment.
+func (a *app) newRunner(bin string) (*sonarcli.Runner, error) {
+	env, err := a.sonarEnv()
+	if err != nil {
+		return nil, err
+	}
+	return &sonarcli.Runner{Bin: bin, Env: env}, nil
+}
+
 // runner resolves the sonar binary.
 func (a *app) runner() (*sonarcli.Runner, error) {
 	res, err := a.resolveSonar()
 	if err != nil {
 		return nil, err
 	}
-	return &sonarcli.Runner{Bin: res.Bin}, nil
+	return a.newRunner(res.Bin)
 }
 
 func (a *app) versionCmd() *cobra.Command {

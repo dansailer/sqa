@@ -13,10 +13,21 @@ if [ -n "${FAKE_SONAR_LOG:-}" ]; then
   done
   printf '\n' >>"$FAKE_SONAR_LOG"
 fi
+if [ -n "${FAKE_SONAR_ENVLOG:-}" ]; then
+  printf '%s|%s|%s\n' "$1" "${SONARQUBE_CLI_KEYCHAIN_FILE-<unset>}" "${SONAR_USER_HOME-<unset>}" >>"$FAKE_SONAR_ENVLOG"
+fi
 case "$1" in
   --version) echo "1.12.0"; exit 0 ;;
   auth)
-    if [ "$2" = status ]; then cat "$d/auth_status.json"; exit "${FAKE_AUTH_EXIT:-0}"; fi
+    if [ "$2" = status ]; then
+      if [ -n "${FAKE_AUTH_STDERR:-}" ]; then echo "$FAKE_AUTH_STDERR" >&2; exit 1; fi
+      cat "$d/auth_status.json"; exit "${FAKE_AUTH_EXIT:-0}"
+    fi
+    if [ "$2" = login ] && [ -n "${FAKE_WRITE_CREDS:-}" ]; then
+      # Simulate a store that replaces the file with a world-readable one.
+      rm -f "$SONARQUBE_CLI_KEYCHAIN_FILE"
+      (umask 022; printf '{"tokens":{}}' >"$SONARQUBE_CLI_KEYCHAIN_FILE")
+    fi
     echo "auth $2 passthrough"; exit 0 ;;
   list)
     newcode=0; project=0

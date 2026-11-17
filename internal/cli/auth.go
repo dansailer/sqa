@@ -8,7 +8,11 @@ import (
 	"github.com/dansailer/sqa/internal/sonarcli"
 )
 
-type authStatus struct{ sonarcli.AuthStatus }
+type authStatus struct {
+	sonarcli.AuthStatus
+	TokenStore string `json:"token_store"`
+	SonarHome  string `json:"sonar_home"`
+}
 
 func (s authStatus) Markdown() string { return s.Table() }
 func (s authStatus) Table() string {
@@ -22,6 +26,8 @@ func (s authStatus) Table() string {
 	if s.Message != "" {
 		out += "\nmessage: " + s.Message
 	}
+	out += "\ntoken store: " + s.TokenStore
+	out += "\nsonar home: " + s.SonarHome
 	return out
 }
 
@@ -54,8 +60,10 @@ func (a *app) authCmd() *cobra.Command {
 
   sqa auth login --server https://sonarqube.example.com
 
-The token is stored by sonar in the OS keychain. For CI, set SONARQUBE_CLI_SERVER
-and SONARQUBE_CLI_TOKEN instead. Coding agents must not run this command.`
+sonar stores the token in ~/.config/sqa/credentials.json (mode 0600), or in the
+OS keychain with auth.store: keychain in config.yaml. For CI, set
+SONARQUBE_CLI_SERVER and SONARQUBE_CLI_TOKEN instead. Coding agents must not run
+this command.`
 	logout := pass("logout [sonar auth logout flags]", "Run `sonar auth logout`")
 	status := &cobra.Command{
 		Use:   "status",
@@ -70,7 +78,8 @@ and SONARQUBE_CLI_TOKEN instead. Coding agents must not run this command.`
 			if err != nil {
 				return err
 			}
-			if err := a.out(authStatus{st}); err != nil {
+			st.Source = authSource(st.Source, r.Env)
+			if err := a.out(authStatus{AuthStatus: st, TokenStore: storeDescription(r.Env), SonarHome: r.Env.SonarHome}); err != nil {
 				return err
 			}
 			if !st.Connected() {

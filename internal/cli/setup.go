@@ -82,7 +82,10 @@ verifies its SHA-256.`,
 			}
 			res.InstallResult = ir
 			res.Status = "installed"
-			r := &sonarcli.Runner{Bin: dest}
+			r, err := a.newRunner(dest)
+			if err != nil {
+				return err
+			}
 			got, err := r.Version(cmd.Context())
 			if err != nil {
 				return &ExitError{Code: ExitServer, Err: fmt.Errorf("installed sonar does not run: %w", err)}
@@ -112,7 +115,11 @@ func (a *app) setupBundled(cmd *cobra.Command, b *sonarcli.Bundle, force bool, n
 		res.Status = "extracted"
 	}
 	res.InstallResult = &sonarcli.InstallResult{Version: b.Version, Platform: b.Platform, URL: "embedded in sqa", SHA256: ex.SHA256, ChecksumSource: "checksum compiled into sqa", Path: ex.Path}
-	got, err := (&sonarcli.Runner{Bin: ex.Path}).Version(cmd.Context())
+	r, err := a.newRunner(ex.Path)
+	if err != nil {
+		return err
+	}
+	got, err := r.Version(cmd.Context())
 	if err != nil {
 		return &ExitError{Code: ExitUsage, Err: fmt.Errorf("bundled sonar does not run: %w", err)}
 	}
@@ -157,7 +164,7 @@ func (d doctorResult) Markdown() string {
 func (d doctorResult) Table() string {
 	var b strings.Builder
 	for _, c := range d.Checks {
-		fmt.Fprintf(&b, "%-5s %-15s %s\n", strings.ToUpper(c.Status), c.Name, c.Detail)
+		fmt.Fprintf(&b, "%-5s %-12s %s\n", strings.ToUpper(c.Status), c.Name, c.Detail)
 	}
 	return b.String()
 }
@@ -165,7 +172,7 @@ func (d doctorResult) Table() string {
 func (a *app) doctorCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "doctor",
-		Short: "Check sonar install, authentication and server version (>= 2025.1)",
+		Short: "Check token store, sonar install, authentication and server version (>= 2025.1)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
@@ -185,7 +192,19 @@ func (a *app) doctorCmd() *cobra.Command {
 				add("sonar", "fail", err.Error(), ExitUsage)
 				return a.finishDoctor(res, code)
 			}
-			r := &sonarcli.Runner{Bin: rs.Bin}
+			env, err := a.sonarEnv()
+			if err != nil {
+				add("token store", "fail", err.Error(), ExitUsage)
+				return a.finishDoctor(res, code)
+			}
+			// Before sonar runs, so permissions fixed here are reported.
+			status, detail := checkTokenStore(env)
+			add("token store", status, detail, ExitUsage)
+			if status == "fail" {
+				return a.finishDoctor(res, code)
+			}
+			add("sonar home", "ok", fmt.Sprintf("%s (%s)", env.SonarHome, env.SonarHomeOrigin), 0)
+			r := &sonarcli.Runner{Bin: rs.Bin, Env: env}
 			src := sonarSourceDetail(rs)
 			v, err := r.Version(ctx)
 			switch {
@@ -200,7 +219,11 @@ func (a *app) doctorCmd() *cobra.Command {
 			st, err := r.AuthStatus(ctx)
 			switch {
 			case err != nil:
-				add("auth", "fail", err.Error(), ExitServer)
+				msg := err.Error()
+				if h := keychainHint(env, msg); h != "" {
+					msg += "; " + h
+				}
+				add("auth", "fail", msg, ExitServer)
 				return a.finishDoctor(res, code)
 			case !st.Connected():
 				msg := "sonar auth status: " + st.Status
@@ -210,7 +233,7 @@ func (a *app) doctorCmd() *cobra.Command {
 				add("auth", "fail", msg+"; the user must run `sqa auth login --server <url>` in a terminal (or set SONARQUBE_CLI_SERVER and SONARQUBE_CLI_TOKEN)", ExitServer)
 				return a.finishDoctor(res, code)
 			default:
-				add("auth", "ok", fmt.Sprintf("connected to %s via %s", st.Server, st.Source), 0)
+				add("auth", "ok", fmt.Sprintf("connected to %s via %s", st.Server, authSource(st.Source, env)), 0)
 			}
 			sv, err := r.ServerVersion(ctx)
 			switch {

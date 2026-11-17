@@ -1,5 +1,5 @@
 {
   "status": "connected",
   "server": "https://sonarqube.example.com",
-  "source": "keychain"
+  "source": "OS Keychain"
 }

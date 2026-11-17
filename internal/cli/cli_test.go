@@ -48,7 +48,8 @@ func newEnv(t *testing.T) *env {
 			t.Fatal(err)
 		}
 	}
-	for _, k := range []string{"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "FAKE_AUTH_EXIT", "FAKE_POST_FAIL", "FAKE_NO_PROJECT"} {
+	for _, k := range []string{"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "FAKE_AUTH_EXIT", "FAKE_POST_FAIL", "FAKE_NO_PROJECT",
+		"FAKE_AUTH_STDERR", "FAKE_WRITE_CREDS", "SONARQUBE_CLI_KEYCHAIN_FILE", "SONAR_USER_HOME"} {
 		t.Setenv(k, "")
 	}
 	t.Setenv("HOME", home)
@@ -364,7 +365,7 @@ func TestDoctor(t *testing.T) {
 	}
 	var d doctorResult
 	_ = json.Unmarshal([]byte(out), &d)
-	if !d.OK || len(d.Checks) != 3 {
+	if !d.OK || len(d.Checks) != 5 {
 		t.Fatalf("%+v", d)
 	}
 
@@ -645,5 +646,170 @@ func TestSonarVersionOverrideBypassesBundle(t *testing.T) {
 	code, out, _ := e.run("version", "--format", "json")
 	if code != 0 || !strings.Contains(out, `"sonar_source": "not found"`) {
 		t.Fatalf("override must not use the bundle: %d %s", code, out)
+	}
+}
+
+// envLog points the fake sonar at a file where it records the token-store
+// variables it received, one "cmd|SONARQUBE_CLI_KEYCHAIN_FILE|SONAR_USER_HOME"
+// line per call.
+func (e *env) envLog() string {
+	p := filepath.Join(e.t.TempDir(), "env.log")
+	e.t.Setenv("FAKE_SONAR_ENVLOG", p)
+	return p
+}
+
+func readLines(t *testing.T, p string) []string {
+	t.Helper()
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.Split(strings.TrimSpace(string(b)), "\n")
+}
+
+func permOf(t *testing.T, p string) os.FileMode {
+	t.Helper()
+	st, err := os.Stat(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return st.Mode().Perm()
+}
+
+func TestFileTokenStoreIsDefault(t *testing.T) {
+	e := newEnv(t)
+	log := e.envLog()
+	t.Setenv("FAKE_WRITE_CREDS", "1")
+	if code, out, stderr := e.run("auth", "login", "--server", "https://sonar.example.com"); code != 0 {
+		t.Fatalf("exit %d %s %s", code, out, stderr)
+	}
+	creds := filepath.Join(e.home, ".config", "sqa", "credentials.json")
+	home := filepath.Join(e.home, ".local", "share", "sqa", "sonar-home")
+	if got := readLines(t, log); len(got) != 1 || got[0] != "auth|"+creds+"|"+home {
+		t.Fatalf("sonar env %v", got)
+	}
+	// The fake replaced the file with mode 0644; sqa must restore 0600.
+	if m := permOf(t, creds); m != 0o600 {
+		t.Errorf("credentials.json %04o", m)
+	}
+	if m := permOf(t, filepath.Dir(creds)); m != 0o700 {
+		t.Errorf("config dir %04o", m)
+	}
+	if m := permOf(t, home); m != 0o700 {
+		t.Errorf("sonar home %04o", m)
+	}
+
+	code, out, _ := e.run("auth", "status", "--format", "json")
+	var st authStatus
+	if err := json.Unmarshal([]byte(out), &st); err != nil || code != 0 {
+		t.Fatalf("exit %d %s", code, out)
+	}
+	if st.Source != "credentials file" || st.TokenStore != "file "+creds || st.SonarHome != home {
+		t.Errorf("auth status %+v", st)
+	}
+}
+
+func TestTokenStoreOverrides(t *testing.T) {
+	e := newEnv(t)
+	log := e.envLog()
+	dir := t.TempDir()
+	cfg := filepath.Join(e.home, "config.yaml")
+	data := "sonar:\n  path: " + filepath.Join(e.fixture, "sonar") + "\n  home: " + filepath.Join(dir, "sh") +
+		"\nauth:\n  credentials_file: " + filepath.Join(dir, "c.json") + "\n"
+	if err := os.WriteFile(cfg, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e.run("auth", "status")
+	t.Setenv("SONARQUBE_CLI_KEYCHAIN_FILE", "/env/c.json")
+	t.Setenv("SONAR_USER_HOME", "/env/home")
+	e.run("auth", "status")
+	t.Setenv("SONARQUBE_CLI_KEYCHAIN_FILE", "")
+	t.Setenv("SONAR_USER_HOME", "")
+	if err := os.WriteFile(cfg, []byte("sonar:\n  path: "+filepath.Join(e.fixture, "sonar")+"\nauth:\n  store: keychain\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, _ := e.run("auth", "status", "--format", "table")
+	if code != 0 || !strings.Contains(out, "token store: OS keychain") || !strings.Contains(out, "source: OS Keychain") {
+		t.Errorf("keychain status %d %s", code, out)
+	}
+	got := readLines(t, log)
+	want := []string{
+		"auth|" + filepath.Join(dir, "c.json") + "|" + filepath.Join(dir, "sh"),
+		"auth|/env/c.json|/env/home",
+		"auth||" + filepath.Join(e.home, ".local", "share", "sqa", "sonar-home"),
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("sonar env\n got %v\nwant %v", got, want)
+	}
+	if _, err := os.Stat(filepath.Join(e.home, ".config", "sqa", "credentials.json")); !os.IsNotExist(err) {
+		t.Error("default credentials file created although never selected")
+	}
+}
+
+func TestBadStoreConfig(t *testing.T) {
+	e := newEnv(t)
+	cfg := filepath.Join(e.home, "config.yaml")
+	if err := os.WriteFile(cfg, []byte("auth:\n  store: plaintext\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, stderr := e.run("auth", "status"); code != ExitUsage || !strings.Contains(stderr, "auth.store") {
+		t.Fatalf("exit %d %s", code, stderr)
+	}
+}
+
+func TestDoctorTokenStore(t *testing.T) {
+	e := newEnv(t)
+	creds := filepath.Join(e.home, ".config", "sqa", "credentials.json")
+	if err := os.MkdirAll(filepath.Dir(creds), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Dir(creds), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(creds, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(creds, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, out, _ := e.run("doctor", "--format", "json")
+	var d doctorResult
+	_ = json.Unmarshal([]byte(out), &d)
+	if code != 0 || d.Checks[0].Name != "token store" || d.Checks[0].Status != "warn" ||
+		!strings.Contains(d.Checks[0].Detail, "directory was 0755") || !strings.Contains(d.Checks[0].Detail, "file was 0644") {
+		t.Fatalf("exit %d %+v", code, d)
+	}
+	if permOf(t, creds) != 0o600 || permOf(t, filepath.Dir(creds)) != 0o700 {
+		t.Error("doctor did not fix permissions")
+	}
+	if !strings.Contains(out, "via credentials file") {
+		t.Errorf("auth source not relabelled: %s", out)
+	}
+	_, out, _ = e.run("doctor", "--format", "json")
+	_ = json.Unmarshal([]byte(out), &d)
+	if d.Checks[0].Status != "ok" || !strings.HasSuffix(d.Checks[0].Detail, "(0600)") {
+		t.Errorf("second run %+v", d.Checks[0])
+	}
+}
+
+func TestDoctorKeychainHints(t *testing.T) {
+	e := newEnv(t)
+	t.Setenv("FAKE_AUTH_STDERR", "Error: No usable system keychain is available: libsecret could not be loaded.")
+	// File store: the keychain hint must not appear.
+	_, out, _ := e.run("doctor")
+	if strings.Contains(out, "apt install") {
+		t.Errorf("keychain hint with file store: %s", out)
+	}
+	cfg := filepath.Join(e.home, "config.yaml")
+	if err := os.WriteFile(cfg, []byte("sonar:\n  path: "+filepath.Join(e.fixture, "sonar")+"\nauth:\n  store: keychain\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, _ := e.run("doctor")
+	if code != ExitServer || !strings.Contains(out, "libsecret-1-0 gnome-keyring") {
+		t.Errorf("libsecret hint: %d %s", code, out)
+	}
+	t.Setenv("FAKE_AUTH_STDERR", "Failed to access the system keychain. Underlying error: The name org.freedesktop.secrets was not provided by any .service files")
+	if _, out, _ := e.run("doctor"); !strings.Contains(out, "gnome-keyring-daemon --unlock") {
+		t.Errorf("secret service hint: %s", out)
 	}
 }
