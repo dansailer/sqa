@@ -115,8 +115,9 @@ never edit Sonar settings or exclusions without explicit approval.
 
 ## Fix loop
 
-1. Pick the highest-ranked finding the user approved for fixing. Branch from the
-   up-to-date default branch (e.g. `sonar/<rule>-<key>`, lowercased and sanitized);
+1. Pick the highest-ranked finding the user approved for fixing. Check out the
+   default branch and pull it (`git pull --ff-only`), then branch from it
+   (e.g. `sonar/<rule>-<key>`, lowercased and sanitized);
    never stack on a previous fix branch. One finding per branch/PR unless the user
    explicitly approved grouping those findings. Ask before creating the branch,
    pushing or opening the PR (a visible write), unless the fix approval already
@@ -133,4 +134,4 @@ never edit Sonar settings or exclusions without explicit approval.
    with the harness's normal git/forge tooling. Never merge it yourself.
 4. SonarQube only updates after a new analysis (CI or the user's usual scan). After
    it runs, verify with `sqa show <key>` or `sqa findings`. Return to the default
-   branch, run `sqa next`, and present that finding before touching it.
+   branch, pull it, run `sqa next`, and present that finding before touching it.
