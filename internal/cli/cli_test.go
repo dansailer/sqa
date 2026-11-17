@@ -217,6 +217,9 @@ func TestNext(t *testing.T) {
 	if !strings.Contains(n.Hint, "recommended verdict") || strings.Contains(n.Hint, "sqa show") {
 		t.Errorf("hint: %s", n.Hint)
 	}
+	if !strings.Contains(n.Brief.URL, "issues=AX-VULN") || !strings.Contains(n.Brief.URL, "id=demo") {
+		t.Errorf("brief url: %s", n.Brief.URL)
+	}
 
 	code, out, stderr = e.run("next", "--format", "table")
 	if code != 0 {
@@ -270,6 +273,9 @@ func TestShowIssue(t *testing.T) {
 	if !strings.Contains(b.NextStep, "ask for explicit approval") {
 		t.Errorf("next step: %s", b.NextStep)
 	}
+	if !strings.Contains(b.URL, "https://sonarqube.example.com/project/issues?") || !strings.Contains(b.URL, "issues=AX-VULN") || !strings.Contains(b.URL, "id=demo") {
+		t.Errorf("url: %s", b.URL)
+	}
 	var sawLines bool
 	for _, c := range e.calls() {
 		if strings.HasPrefix(c, "api get /api/sources/lines") && strings.Contains(c, "from=22") && strings.Contains(c, "to=33") {
@@ -278,6 +284,24 @@ func TestShowIssue(t *testing.T) {
 	}
 	if !sawLines {
 		t.Errorf("sources call: %v", e.calls())
+	}
+}
+
+func TestFindingURL(t *testing.T) {
+	got := FindingURL("https://sonarqube.example.com/", "demo", "AX-VULN", "issue", "", "")
+	if !strings.Contains(got, "https://sonarqube.example.com/project/issues?") || !strings.Contains(got, "id=demo") || !strings.Contains(got, "issues=AX-VULN") || !strings.Contains(got, "open=AX-VULN") {
+		t.Fatalf("issue: %s", got)
+	}
+	got = FindingURL("https://sonarqube.example.com", "demo", "HS-1", "hotspot", "main", "")
+	if !strings.Contains(got, "/security_hotspots?") || !strings.Contains(got, "hotspots=HS-1") || !strings.Contains(got, "branch=main") || strings.Contains(got, "issues=") {
+		t.Fatalf("hotspot branch: %s", got)
+	}
+	got = FindingURL("https://sonarqube.example.com", "demo", "AX-VULN", "issue", "main", "42")
+	if !strings.Contains(got, "pullRequest=42") || strings.Contains(got, "branch=") {
+		t.Fatalf("pr wins over branch: %s", got)
+	}
+	if FindingURL("", "demo", "AX-VULN", "issue", "", "") != "" || FindingURL("https://sq.example", "", "k", "issue", "", "") != "" {
+		t.Fatal("empty inputs should yield no URL")
 	}
 }
 
@@ -291,6 +315,9 @@ func TestShowHotspotAndUnknown(t *testing.T) {
 	_ = json.Unmarshal([]byte(out), &b)
 	if b.Kind != "hotspot" || b.Severity != "HIGH" || b.File != "internal/api/cors.go" {
 		t.Errorf("%+v", b)
+	}
+	if !strings.Contains(b.URL, "/security_hotspots?") || !strings.Contains(b.URL, "hotspots=HS-1") || !strings.Contains(b.URL, "id=demo") {
+		t.Errorf("url: %s", b.URL)
 	}
 	if code, _, _ := e.run("show", "NOPE"); code != ExitUsage {
 		t.Errorf("unknown key exit %d", code)
@@ -506,7 +533,7 @@ func TestSkillInstallAndPrint(t *testing.T) {
 	if !strings.HasPrefix(string(b), "---\nname: sqa\ndescription: ") {
 		t.Fatalf("frontmatter: %.80s", b)
 	}
-	for _, must := range []string{"No MCP", "sonar integrate", "sonar api", "--approved-by-user", "Stop and ask the user explicitly", "Never mark a finding as false positive or accepted to reduce the count", "Conventional Commits", "sonar.tests"} {
+	for _, must := range []string{"No MCP", "sonar integrate", "sonar api", "--approved-by-user", "Stop and ask the user explicitly", "Never mark a finding as false positive or accepted to reduce the count", "Conventional Commits", "sonar.tests", "SonarQube URL", "`sonar` label"} {
 		if !strings.Contains(string(b), must) {
 			t.Errorf("SKILL.md missing %q", must)
 		}

@@ -136,7 +136,7 @@ Multiple servers: out of scope (one internal instance). `sonar` keeps one active
 | `sqa doctor` | Check `sonar` installed and version matches (warn on mismatch), authenticated (`sonar auth status`, shows server and source), server ≥ 2025.1 (or Community Build ≥ 25.1). |
 | `sqa findings` | Unified, ranked list of open issues (`OPEN`, `CONFIRMED`) + `TO_REVIEW` hotspots. Flags: `--project`, `--branch`, `--pr`, `--file`, `--new-code`, `--min-severity`, `--security-only`, `--limit` (default 50, 0 = all), `--fail-on`, `--format`. |
 | `sqa next` | The highest-priority open finding, with the same brief as `sqa show` (for one-at-a-time loops). |
-| `sqa show <key>` | Agent-ready brief: rule, rationale (rule description sections `root_cause` / `assess_the_problem` / `how_to_fix`, or hotspot risk text), location, code context (`--context N`, default 5, HTML stripped), data-flow, possible verdicts, next step. Tries the key as an issue, then as a hotspot. |
+| `sqa show <key>` | Agent-ready brief: rule, rationale (rule description sections `root_cause` / `assess_the_problem` / `how_to_fix`, or hotspot risk text), location, code context (`--context N`, default 5, HTML stripped), data-flow, possible verdicts, next step, and a URL to the finding on the server (from `sonar auth status`; the token is never read). Tries the key as an issue, then as a hotspot. |
 | `sqa version` | sqa version, pinned `sonar` version, whether it is bundled (version, SHA-256) and which `sonar` is in use. |
 
 ### State-changing (require user approval — see §8)
@@ -199,7 +199,7 @@ Frontmatter: `name: sqa`, `description: …`. Content:
 - What `sqa` is; prerequisite: `sqa doctor` must pass; the user (not the agent) runs `sqa auth login`.
 - **Hard rules**: never use, install or configure a SonarQube MCP server; never run `sonar integrate` or `sonar api`; never run `sonar auth login` (the user does that); never set, read or print tokens; always ask the user before any triage decision.
 - Triage order (§7) and how to read `next` / `findings` / `show` output.
-- The fix loop: one finding per branch/PR from the up-to-date default branch → fix and commit (Conventional Commits, include the rule key) → tests → open a PR (ask first; never merge) → return to the default branch → (re-scan via CI or `sonar` analysis if available) → re-check with `sqa show <key>` / `sqa next`. Presentation: if the finding is in test code, accept or a Sonar exclusion may be appropriate; never edit Sonar settings without approval.
+- The fix loop: one finding per branch/PR from the up-to-date default branch → fix and commit (Conventional Commits, include the rule key) → tests → open a PR (ask first; never merge; body links the finding; apply the `sonar` label) → return to the default branch → (re-scan via CI or `sonar` analysis if available) → re-check with `sqa show <key>` / `sqa next`. Presentation: if the finding is in test code, accept or a Sonar exclusion may be appropriate; never edit Sonar settings without approval.
 - How to present a recommendation and ask for approval (template), and that approval covers only the presented findings.
 - Never mark something FP/accepted just to reduce counts; justify every decision in the comment.
 

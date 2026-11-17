@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -49,13 +50,18 @@ type Brief struct {
 	Verdicts    []string   `json:"verdicts"`
 	NextStep    string     `json:"next_step"`
 	ContextNote string     `json:"context_note,omitempty"`
+	URL         string     `json:"url,omitempty"`
 }
 
 // Markdown renders the brief.
 func (b Brief) Markdown() string {
 	var s strings.Builder
 	fmt.Fprintf(&s, "## %s · %s · %s\n\n", b.Category, b.Severity, b.Rule)
-	fmt.Fprintf(&s, "- **Key:** `%s` (%s, status %s)\n- **Rule:** %s\n- **Where:** `%s:%d`\n- **Message:** %s\n\n", b.Key, b.Kind, b.Status, b.RuleName, b.File, b.Line, b.Message)
+	fmt.Fprintf(&s, "- **Key:** `%s` (%s, status %s)\n- **Rule:** %s\n- **Where:** `%s:%d`\n- **Message:** %s\n", b.Key, b.Kind, b.Status, b.RuleName, b.File, b.Line, b.Message)
+	if b.URL != "" {
+		fmt.Fprintf(&s, "- **URL:** %s\n", b.URL)
+	}
+	s.WriteString("\n")
 	if len(b.Code) > 0 {
 		s.WriteString("```\n")
 		for _, c := range b.Code {
@@ -145,9 +151,43 @@ func flowSteps(flows []sonarcli.Flow, comps []sonarcli.Component) []FlowStep {
 	return out
 }
 
+// FindingURL is the SonarQube page for an issue or hotspot. The server is the
+// connected instance (from `sonar auth status`); the token is never read.
+func FindingURL(server, project, key, kind, branch, pr string) string {
+	server = strings.TrimRight(strings.TrimSpace(server), "/")
+	if server == "" || project == "" || key == "" {
+		return ""
+	}
+	q := url.Values{}
+	q.Set("id", project)
+	path := "/project/issues"
+	if kind == "hotspot" {
+		path = "/security_hotspots"
+		q.Set("hotspots", key)
+	} else {
+		q.Set("issues", key)
+		q.Set("open", key)
+	}
+	switch {
+	case pr != "":
+		q.Set("pullRequest", pr)
+	case branch != "":
+		q.Set("branch", branch)
+	}
+	return server + path + "?" + q.Encode()
+}
+
+func findingURL(ctx context.Context, r *sonarcli.Runner, project, key, kind, branch, pr string) string {
+	st, err := r.AuthStatus(ctx)
+	if err != nil || st.Server == "" {
+		return ""
+	}
+	return FindingURL(st.Server, project, key, kind, branch, pr)
+}
+
 func loadBrief(ctx context.Context, r *sonarcli.Runner, key string, contextLines int, branch, pr string) (Brief, error) {
 	var b Brief
-	var component string
+	var component, project string
 	var tr *sonarcli.TextRange
 	var rule *sonarcli.Rule
 
@@ -160,7 +200,7 @@ func loadBrief(ctx context.Context, r *sonarcli.Runner, key string, contextLines
 		b = Brief{Key: key, Kind: string(f.Kind), Category: f.Category, Severity: f.SeverityStr, Quality: f.Quality,
 			Status: f.Status, Rule: issue.Rule, File: f.File, Line: f.Line, Message: issue.Message,
 			Flows: flowSteps(issue.Flows, comps), Verdicts: []string{"fix", "fp", "accept"}}
-		component, tr = issue.Component, issue.TextRange
+		component, tr, project = issue.Component, issue.TextRange, issue.Project
 		rule, _ = r.ShowRule(ctx, issue.Rule)
 		b.Why, b.Assess, b.HowToFix = ruleSections(rule, issue.RuleDescriptionCtx)
 	} else {
@@ -181,7 +221,7 @@ func loadBrief(ctx context.Context, r *sonarcli.Runner, key string, contextLines
 		if h.Resolution != "" {
 			b.Status += "/" + h.Resolution
 		}
-		component, tr = h.Component.Key, h.TextRange
+		component, tr, project = h.Component.Key, h.TextRange, h.Project.Key
 		rule, _ = r.ShowRule(ctx, h.Rule.Key)
 		b.Why, b.Assess, b.HowToFix = ruleSections(rule, "")
 		if b.Why == "" {
@@ -210,6 +250,7 @@ func loadBrief(ctx context.Context, r *sonarcli.Runner, key string, contextLines
 		}
 	}
 	b.NextStep = "Present this finding to the user with your recommended verdict and reasoning, then STOP and ask for explicit approval. Only after approval: fix the code, or run `sqa mark`/`sqa hotspot` with --approved-by-user and the user's reasoning as --comment."
+	b.URL = findingURL(ctx, r, project, key, b.Kind, branch, pr)
 	return b, nil
 }
 
