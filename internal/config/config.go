@@ -22,7 +22,8 @@ type Config struct {
 
 // Sonar configures the official SonarSource CLI that sqa wraps.
 type Sonar struct {
-	// Version overrides the pinned sonar CLI version used by `sqa setup`.
+	// Version overrides the pinned sonar CLI version. When it differs from the
+	// bundled version, sqa uses the `sqa setup` download instead of the bundle.
 	Version string `yaml:"version"`
 	// Path points at a sonar binary to use instead of the managed one.
 	Path string `yaml:"path"`
@@ -75,6 +76,13 @@ func StateDir() (string, error) {
 func ManagedSonarPath() (string, error) {
 	d, err := DataDir()
 	return filepath.Join(d, "bin", "sonar"), err
+}
+
+// SonarBinDir holds sqa-managed sonar binaries: the `sqa setup` download
+// (sonar) and the extracted bundled binary (sonar-<version>).
+func SonarBinDir() (string, error) {
+	d, err := DataDir()
+	return filepath.Join(d, "bin"), err
 }
 
 // Path returns the config file path, honouring SQA_CONFIG.

@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -139,23 +140,67 @@ func (r *Runner) Interactive(ctx context.Context, stdin io.Reader, stdout, stder
 	return nil
 }
 
-// Resolve picks the sonar binary: an explicit configured path, else the
-// managed install from `sqa setup`, else `sonar` on PATH.
-func Resolve(configured, managed string) (string, error) {
-	if configured != "" {
-		if _, err := os.Stat(configured); err != nil {
-			return "", fmt.Errorf("sonar.path %q: %w", configured, err)
+// Source names where the sonar binary came from.
+type Source string
+
+// Binary sources, in resolution order.
+const (
+	SourceConfig  Source = "sonar.path"
+	SourceBundled Source = "bundled"
+	SourceManaged Source = "sqa setup"
+	SourcePATH    Source = "PATH"
+)
+
+// Resolver picks the sonar binary. Order: an explicit configured path, else
+// the binary bundled into sqa (extracted on first use), else the managed
+// install from `sqa setup`, else `sonar` on PATH.
+type Resolver struct {
+	Configured string  // sonar.path from config
+	Bundle     *Bundle // nil when not bundled (or overridden by sonar.version)
+	BundleDir  string  // where the bundle is extracted
+	Managed    string  // `sqa setup` download location
+}
+
+// Resolved is the chosen sonar binary.
+type Resolved struct {
+	Bin    string
+	Source Source
+	// Extract is set when Source is SourceBundled and Resolve extracted.
+	Extract *ExtractResult
+}
+
+// Resolve returns the binary to run, extracting the bundle when needed.
+func (r Resolver) Resolve() (*Resolved, error) { return r.resolve(true) }
+
+// Locate reports which binary Resolve would use without writing anything.
+// For a bundle, Bin is the extraction target, which may not exist yet.
+func (r Resolver) Locate() (*Resolved, error) { return r.resolve(false) }
+
+func (r Resolver) resolve(extract bool) (*Resolved, error) {
+	if r.Configured != "" {
+		if _, err := os.Stat(r.Configured); err != nil {
+			return nil, fmt.Errorf("sonar.path %q: %w", r.Configured, err)
 		}
-		return configured, nil
+		return &Resolved{Bin: r.Configured, Source: SourceConfig}, nil
 	}
-	if managed != "" {
-		if st, err := os.Stat(managed); err == nil && !st.IsDir() {
-			return managed, nil
+	if r.Bundle != nil {
+		if !extract {
+			return &Resolved{Bin: filepath.Join(r.BundleDir, r.Bundle.FileName()), Source: SourceBundled}, nil
+		}
+		res, err := r.Bundle.Extract(r.BundleDir, false)
+		if err != nil {
+			return nil, fmt.Errorf("bundled sonar: %w", err)
+		}
+		return &Resolved{Bin: res.Path, Source: SourceBundled, Extract: res}, nil
+	}
+	if r.Managed != "" {
+		if st, err := os.Stat(r.Managed); err == nil && !st.IsDir() {
+			return &Resolved{Bin: r.Managed, Source: SourceManaged}, nil
 		}
 	}
 	p, err := exec.LookPath("sonar")
 	if err != nil {
-		return "", errors.New("sonar CLI not found: run `sqa setup` (or set sonar.path in ~/.config/sqa/config.yaml)")
+		return nil, errors.New("sonar CLI not found: run `sqa setup` (or set sonar.path in ~/.config/sqa/config.yaml)")
 	}
-	return p, nil
+	return &Resolved{Bin: p, Source: SourcePATH}, nil
 }

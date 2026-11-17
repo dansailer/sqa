@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"runtime/debug"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -152,26 +153,77 @@ func (a *app) out(v any) error {
 	return output.Write(a.stdout, f, v)
 }
 
-// runner resolves the sonar binary.
-func (a *app) runner() (*sonarcli.Runner, error) {
+// bundledSonar is the sonar binary embedded in this build (nil without the
+// bundled_sonar build tag). A var so tests can inject a fake bundle.
+var bundledSonar = sonarcli.Bundled()
+
+// activeBundle returns the bundle to use, or nil when the build has none or
+// sonar.version in config asks for a different version.
+func (a *app) activeBundle() *sonarcli.Bundle {
+	b := bundledSonar
+	if b == nil {
+		return nil
+	}
+	if a.cfg != nil && a.cfg.Sonar.Version != "" && a.cfg.Sonar.Version != b.Version {
+		return nil
+	}
+	return b
+}
+
+func (a *app) resolver() (sonarcli.Resolver, error) {
 	managed, err := config.ManagedSonarPath()
 	if err != nil {
-		return nil, &ExitError{Code: ExitUsage, Err: err}
+		return sonarcli.Resolver{}, err
 	}
-	bin, err := sonarcli.Resolve(a.cfg.Sonar.Path, managed)
+	dir, err := config.SonarBinDir()
+	if err != nil {
+		return sonarcli.Resolver{}, err
+	}
+	return sonarcli.Resolver{Configured: a.cfg.Sonar.Path, Bundle: a.activeBundle(), BundleDir: dir, Managed: managed}, nil
+}
+
+// resolveSonar picks (and if bundled, extracts) the sonar binary.
+func (a *app) resolveSonar() (*sonarcli.Resolved, error) {
+	rs, err := a.resolver()
 	if err != nil {
 		return nil, &ExitError{Code: ExitUsage, Err: err}
 	}
-	return &sonarcli.Runner{Bin: bin}, nil
+	res, err := rs.Resolve()
+	if err != nil {
+		return nil, &ExitError{Code: ExitUsage, Err: err}
+	}
+	return res, nil
+}
+
+// runner resolves the sonar binary.
+func (a *app) runner() (*sonarcli.Runner, error) {
+	res, err := a.resolveSonar()
+	if err != nil {
+		return nil, err
+	}
+	return &sonarcli.Runner{Bin: res.Bin}, nil
 }
 
 func (a *app) versionCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
-		Short: "Print the sqa version and the pinned sonar CLI version",
+		Short: "Print the sqa version and which sonar CLI it uses (bundled or not)",
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			return a.out(versionInfo{Version: Version(), Commit: commit, PinnedSonar: a.sonarVersion()})
+			v := versionInfo{Version: Version(), Commit: commit, PinnedSonar: a.sonarVersion()}
+			if b := bundledSonar; b != nil {
+				v.Bundled = true
+				v.BundledVersion = b.Version
+				v.BundledSHA256 = b.SHA256
+			}
+			if rs, err := a.resolver(); err == nil {
+				if loc, err := rs.Locate(); err == nil {
+					v.SonarSource, v.SonarPath = string(loc.Source), loc.Bin
+				} else {
+					v.SonarSource = "not found"
+				}
+			}
+			return a.out(v)
 		},
 	}
 }
@@ -184,18 +236,36 @@ func (a *app) sonarVersion() string {
 }
 
 type versionInfo struct {
-	Version     string `json:"version"`
-	Commit      string `json:"commit,omitempty"`
-	PinnedSonar string `json:"sonar_cli"`
+	Version        string `json:"version"`
+	Commit         string `json:"commit,omitempty"`
+	PinnedSonar    string `json:"sonar_cli"`
+	Bundled        bool   `json:"sonar_bundled"`
+	BundledVersion string `json:"sonar_bundled_version,omitempty"`
+	BundledSHA256  string `json:"sonar_bundled_sha256,omitempty"`
+	SonarSource    string `json:"sonar_source,omitempty"`
+	SonarPath      string `json:"sonar_path,omitempty"`
 }
 
 func (v versionInfo) Markdown() string { return v.Table() }
 func (v versionInfo) Table() string {
-	s := "sqa " + v.Version
+	var b strings.Builder
+	b.WriteString("sqa " + v.Version)
 	if v.Commit != "" {
-		s += " (" + v.Commit + ")"
+		b.WriteString(" (" + v.Commit + ")")
 	}
-	return s + "\nsonar CLI (pinned): " + v.PinnedSonar
+	b.WriteString("\nsonar CLI (pinned): " + v.PinnedSonar)
+	if v.Bundled {
+		b.WriteString("\nsonar CLI bundled:  yes, " + v.BundledVersion + " (sha256 " + v.BundledSHA256 + ")")
+	} else {
+		b.WriteString("\nsonar CLI bundled:  no")
+	}
+	if v.SonarSource != "" {
+		b.WriteString("\nsonar CLI in use:   " + v.SonarSource)
+		if v.SonarPath != "" {
+			b.WriteString(" (" + v.SonarPath + ")")
+		}
+	}
+	return b.String()
 }
 
 // Main is the entry point used by cmd/sqa.

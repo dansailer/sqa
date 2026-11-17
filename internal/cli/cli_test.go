@@ -52,6 +52,11 @@ func newEnv(t *testing.T) *env {
 		t.Setenv(k, "")
 	}
 	t.Setenv("HOME", home)
+	// Tests are independent of the build tag: no bundled sonar unless a test
+	// injects one with withBundle.
+	old := bundledSonar
+	bundledSonar = nil
+	t.Cleanup(func() { bundledSonar = old })
 	cfg := filepath.Join(home, "config.yaml")
 	if err := os.WriteFile(cfg, []byte("sonar:\n  path: "+filepath.Join(fixture, "sonar")+"\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -550,5 +555,95 @@ func TestFindingsWithoutProject(t *testing.T) {
 	code, _, stderr := e.run("findings")
 	if code != ExitUsage || !strings.Contains(stderr, "--project") {
 		t.Fatalf("exit %d %s", code, stderr)
+	}
+}
+
+// withBundle injects the fake sonar script as the bundled binary and removes
+// the sonar.path override, as in a release build.
+func (e *env) withBundle() *sonarcli.Bundle {
+	e.t.Helper()
+	data, err := os.ReadFile(filepath.Join(e.fixture, "sonar"))
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	sum := sha256.Sum256(data)
+	b := &sonarcli.Bundle{Version: sonarcli.PinnedVersion, Platform: "linux-x86-64", SHA256: hex.EncodeToString(sum[:]), Data: data}
+	bundledSonar = b
+	if err := os.WriteFile(filepath.Join(e.home, "config.yaml"), nil, 0o600); err != nil {
+		e.t.Fatal(err)
+	}
+	return b
+}
+
+func TestBundledSonarIsExtractedOnFirstUse(t *testing.T) {
+	e := newEnv(t)
+	b := e.withBundle()
+	dest := filepath.Join(e.home, ".local", "share", "sqa", "bin", "sonar-"+sonarcli.PinnedVersion)
+
+	code, out, stderr := e.run("version", "--format", "json")
+	if code != 0 {
+		t.Fatalf("exit %d %s", code, stderr)
+	}
+	var v versionInfo
+	if err := json.Unmarshal([]byte(out), &v); err != nil {
+		t.Fatal(err, out)
+	}
+	if !v.Bundled || v.BundledVersion != sonarcli.PinnedVersion || v.BundledSHA256 != b.SHA256 || v.SonarSource != "bundled" || v.SonarPath != dest {
+		t.Fatalf("%+v", v)
+	}
+	if _, err := os.Stat(dest); err == nil {
+		t.Fatal("version must not extract")
+	}
+
+	code, out, stderr = e.run("doctor", "--format", "json")
+	if code != 0 {
+		t.Fatalf("doctor exit %d %s %s", code, out, stderr)
+	}
+	if !strings.Contains(out, "bundled in sqa") {
+		t.Errorf("doctor does not report the bundled source: %s", out)
+	}
+	if st, err := os.Stat(dest); err != nil || st.Mode().Perm() != 0o755 {
+		t.Fatalf("not extracted: %v", err)
+	}
+	if code, out, _ := e.run("findings", "--format", "json"); code != 0 || !strings.Contains(out, "AX-VULN") {
+		t.Fatalf("findings via bundled sonar: %d %s", code, out)
+	}
+}
+
+func TestSetupWithBundledSonar(t *testing.T) {
+	e := newEnv(t)
+	b := e.withBundle()
+	code, out, stderr := e.run("setup", "--format", "json")
+	if code != 0 {
+		t.Fatalf("exit %d %s", code, stderr)
+	}
+	if !strings.Contains(out, `"status": "extracted"`) || !strings.Contains(out, `"source": "bundled"`) || !strings.Contains(out, b.SHA256) {
+		t.Fatalf("%s", out)
+	}
+	if _, out, _ = e.run("setup", "--format", "json"); !strings.Contains(out, `"status": "already extracted"`) {
+		t.Fatalf("%s", out)
+	}
+	if _, out, _ = e.run("setup", "--force", "--format", "json"); !strings.Contains(out, `"status": "extracted"`) {
+		t.Fatalf("force: %s", out)
+	}
+
+	// A corrupt bundle never reaches disk or exec.
+	b.Data = append([]byte(nil), b.Data...)
+	b.Data[len(b.Data)-2] ^= 1
+	if code, _, stderr := e.run("setup", "--force"); code != ExitUsage || !strings.Contains(stderr, "corrupt") {
+		t.Fatalf("corrupt bundle: exit %d %s", code, stderr)
+	}
+}
+
+func TestSonarVersionOverrideBypassesBundle(t *testing.T) {
+	e := newEnv(t)
+	e.withBundle()
+	if err := os.WriteFile(filepath.Join(e.home, "config.yaml"), []byte("sonar:\n  version: \"9.9.9.1\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", t.TempDir())
+	code, out, _ := e.run("version", "--format", "json")
+	if code != 0 || !strings.Contains(out, `"sonar_source": "not found"`) {
+		t.Fatalf("override must not use the bundle: %d %s", code, out)
 	}
 }

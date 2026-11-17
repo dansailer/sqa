@@ -3,3 +3,5 @@
 /build/
 coverage.out
 *.test
+# official sonar binary, fetched by `make fetch-sonar`, embedded at build time
+/internal/sonarcli/bundled/sonar-*

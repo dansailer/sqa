@@ -20,6 +20,7 @@ type setupResult struct {
 	Status  string `json:"status"`
 	Version string `json:"version"`
 	Path    string `json:"path"`
+	Source  string `json:"source"`
 	*sonarcli.InstallResult
 	Note string `json:"note,omitempty"`
 }
@@ -27,7 +28,7 @@ type setupResult struct {
 func (s setupResult) Markdown() string { return s.Table() }
 func (s setupResult) Table() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "sonar CLI %s %s at %s\n", s.Version, s.Status, s.Path)
+	fmt.Fprintf(&b, "sonar CLI %s %s at %s (source: %s)\n", s.Version, s.Status, s.Path, s.Source)
 	if s.InstallResult != nil {
 		fmt.Fprintf(&b, "source:   %s\nsha256:   %s (verified against %s)\n", s.URL, s.SHA256, s.ChecksumSource)
 	}
@@ -42,19 +43,31 @@ func (a *app) setupCmd() *cobra.Command {
 	var ver string
 	cmd := &cobra.Command{
 		Use:   "setup",
-		Short: "Install the pinned official sonar CLI (checksum-verified) into ~/.local/share/sqa/bin",
-		Args:  cobra.NoArgs,
+		Short: "Extract the bundled sonar CLI, or download a checksum-verified one into ~/.local/share/sqa/bin",
+		Long: `With a release build, sonar is bundled inside sqa and extracted automatically on
+first use; 'sqa setup' just performs (or with --force redoes) and verifies that
+extraction. Without a bundled sonar, or with --sonar-version set to another
+version, it downloads that official release from binaries.sonarsource.com and
+verifies its SHA-256.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if ver == "" {
 				ver = a.sonarVersion()
+			}
+			note := ""
+			if a.cfg.Sonar.Path != "" {
+				note = "note: sonar.path in config.yaml overrides this install (" + a.cfg.Sonar.Path + ")"
+			}
+			if b := bundledSonar; b != nil && ver == b.Version {
+				return a.setupBundled(cmd, b, force, note)
 			}
 			dest, err := config.ManagedSonarPath()
 			if err != nil {
 				return &ExitError{Code: ExitUsage, Err: err}
 			}
-			res := setupResult{Version: ver, Path: dest}
-			if a.cfg.Sonar.Path != "" {
-				res.Note = "note: sonar.path in config.yaml overrides the managed install (" + a.cfg.Sonar.Path + ")"
+			res := setupResult{Version: ver, Path: dest, Source: string(sonarcli.SourceManaged), Note: note}
+			if b := bundledSonar; b != nil && (a.cfg.Sonar.Version == "" || a.cfg.Sonar.Version == b.Version) {
+				res.Note = strings.TrimSpace(res.Note + "\nnote: sqa still uses its bundled sonar " + b.Version + "; set sonar.version: \"" + ver + "\" in config.yaml to use this download")
 			}
 			if !force && ver == sonarcli.PinnedVersion {
 				if ok := alreadyInstalled(dest); ok {
@@ -80,9 +93,33 @@ func (a *app) setupCmd() *cobra.Command {
 			return a.out(res)
 		},
 	}
-	cmd.Flags().BoolVar(&force, "force", false, "reinstall even if the pinned version is present")
-	cmd.Flags().StringVar(&ver, "sonar-version", "", "sonar CLI version to install (default: pinned "+sonarcli.PinnedVersion+" or sonar.version from config)")
+	cmd.Flags().BoolVar(&force, "force", false, "re-extract / reinstall even if a verified copy is present")
+	cmd.Flags().StringVar(&ver, "sonar-version", "", "sonar CLI version (default: bundled/pinned "+sonarcli.PinnedVersion+" or sonar.version from config); another version is downloaded")
 	return cmd
+}
+
+func (a *app) setupBundled(cmd *cobra.Command, b *sonarcli.Bundle, force bool, note string) error {
+	dir, err := config.SonarBinDir()
+	if err != nil {
+		return &ExitError{Code: ExitUsage, Err: err}
+	}
+	ex, err := b.Extract(dir, force)
+	if err != nil {
+		return &ExitError{Code: ExitUsage, Err: err}
+	}
+	res := setupResult{Version: b.Version, Path: ex.Path, Source: string(sonarcli.SourceBundled), Status: "already extracted", Note: note}
+	if ex.Extracted {
+		res.Status = "extracted"
+	}
+	res.InstallResult = &sonarcli.InstallResult{Version: b.Version, Platform: b.Platform, URL: "embedded in sqa", SHA256: ex.SHA256, ChecksumSource: "checksum compiled into sqa", Path: ex.Path}
+	got, err := (&sonarcli.Runner{Bin: ex.Path}).Version(cmd.Context())
+	if err != nil {
+		return &ExitError{Code: ExitUsage, Err: fmt.Errorf("bundled sonar does not run: %w", err)}
+	}
+	if got != sonarcli.ShortVersion(b.Version) {
+		res.Note = strings.TrimSpace(res.Note + "\nwarning: sonar --version reports " + got)
+	}
+	return a.out(res)
 }
 
 func alreadyInstalled(dest string) bool {
@@ -143,20 +180,22 @@ func (a *app) doctorCmd() *cobra.Command {
 					}
 				}
 			}
-			r, err := a.runner()
+			rs, err := a.resolveSonar()
 			if err != nil {
 				add("sonar", "fail", err.Error(), ExitUsage)
 				return a.finishDoctor(res, code)
 			}
+			r := &sonarcli.Runner{Bin: rs.Bin}
+			src := sonarSourceDetail(rs)
 			v, err := r.Version(ctx)
 			switch {
 			case err != nil:
-				add("sonar", "fail", r.Bin+": "+err.Error(), ExitUsage)
+				add("sonar", "fail", r.Bin+" ("+src+"): "+err.Error(), ExitUsage)
 				return a.finishDoctor(res, code)
 			case v != sonarcli.ShortVersion(a.sonarVersion()):
-				add("sonar", "warn", fmt.Sprintf("%s is version %s, sqa is tested with %s (run `sqa setup`)", r.Bin, v, a.sonarVersion()), 0)
+				add("sonar", "warn", fmt.Sprintf("%s (%s) is version %s, sqa is tested with %s (run `sqa setup`)", r.Bin, src, v, a.sonarVersion()), 0)
 			default:
-				add("sonar", "ok", fmt.Sprintf("%s (version %s)", r.Bin, v), 0)
+				add("sonar", "ok", fmt.Sprintf("%s (version %s, %s)", r.Bin, v, src), 0)
 			}
 			st, err := r.AuthStatus(ctx)
 			switch {
@@ -211,4 +250,17 @@ func ServerVersionSupported(v string) bool {
 		return true
 	}
 	return false
+}
+
+func sonarSourceDetail(rs *sonarcli.Resolved) string {
+	switch rs.Source {
+	case sonarcli.SourceBundled:
+		return "bundled in sqa, sha256 verified"
+	case sonarcli.SourceConfig:
+		return "from sonar.path in config"
+	case sonarcli.SourceManaged:
+		return "downloaded by sqa setup"
+	default:
+		return "found on PATH"
+	}
 }
