@@ -15,6 +15,36 @@ decision**.
 
 ## Install
 
+### With mise (recommended)
+
+[mise](https://mise.jdx.dev) installs `sqa` straight from the GitHub releases
+and verifies the download (GitHub asset digest or `checksums.txt`, plus the
+build provenance attestation):
+
+```sh
+mise use -g github:dansailer/sqa
+sqa setup            # install the pinned official sonar CLI (checksum-verified)
+sqa skill install    # ~/.agents/skills/sqa/SKILL.md
+sqa auth login       # you, once, in a terminal (browser login, token goes to the OS keychain)
+```
+
+To have mise run setup and refresh the skill automatically on every install
+and upgrade, add a `postinstall` hook to the tool entry in your global config
+(`~/.config/mise/config.toml`):
+
+```toml
+[tools."github:dansailer/sqa"]
+version = "latest"
+postinstall = '"$MISE_TOOL_INSTALL_PATH/sqa" setup && "$MISE_TOOL_INSTALL_PATH/sqa" skill install'
+```
+
+Then run `mise install`. Add `&& "$MISE_TOOL_INSTALL_PATH/sqa" skill install --target claude`
+if you also use Claude Code. Upgrades with `mise upgrade github:dansailer/sqa`
+rerun the hook, so the installed skill always matches the binary.
+
+> While the repository is private, mise needs a GitHub token to see the
+> releases: `export GITHUB_TOKEN=$(gh auth token)` (or `MISE_GITHUB_TOKEN`).
+
 ### Release binaries
 
 Download the archive for your platform from the
