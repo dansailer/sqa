@@ -29,19 +29,27 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Go
-        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+      # Installs the tools pinned in mise.toml / mise.lock (`mise install --locked`)
+      # and caches them. The mise binary is verified against its signed checksums.
+      - name: Set up mise
+        uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         with:
-          go-version-file: go.mod
+          version: 2026.11.9
           cache: true
 
-      - name: go vet
-        run: go vet ./...
-
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+      - name: Cache Go modules and build cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          version: v2.15.0
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+            ~/.cache/golangci-lint
+          key: go-${{ github.workflow }}-${{ github.job }}-${{ runner.os }}-${{ hashFiles('go.sum', 'mise.lock') }}
+          restore-keys: |
+            go-${{ github.workflow }}-${{ github.job }}-${{ runner.os }}-
+
+      - name: go vet + golangci-lint
+        run: mise run lint
 
   test:
     name: Test
@@ -58,24 +66,37 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Go
-        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+      # Installs the tools pinned in mise.toml / mise.lock (`mise install --locked`)
+      # and caches them. The mise binary is verified against its signed checksums.
+      - name: Set up mise
+        uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         with:
-          go-version-file: go.mod
+          version: 2026.11.9
           cache: true
 
+      - name: Cache Go modules and build cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-${{ github.workflow }}-${{ github.job }}-${{ runner.os }}-${{ hashFiles('go.sum', 'mise.lock') }}
+          restore-keys: |
+            go-${{ github.workflow }}-${{ github.job }}-${{ runner.os }}-
+
       - name: Test (race + coverage)
-        run: go test -race -covermode=atomic -coverprofile=coverage.out ./...
+        run: mise run test -- -covermode=atomic -coverprofile=coverage.out
 
       - name: Coverage summary
         run: go tool cover -func=coverage.out | tail -n 1
 
       - name: Build without bundled sonar (linux/amd64)
         env:
-          CGO_ENABLED: "0"
           GOOS: linux
           GOARCH: amd64
-        run: go build -trimpath -o /dev/null ./cmd/sqa
+        run: |
+          mise run build
+          rm -f sqa
 
       - name: Upload coverage
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -99,15 +120,27 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Go
-        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+      # Installs the tools pinned in mise.toml / mise.lock (`mise install --locked`)
+      # and caches them. The mise binary is verified against its signed checksums.
+      - name: Set up mise
+        uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         with:
-          go-version-file: go.mod
+          version: 2026.11.9
           cache: true
+
+      - name: Cache Go modules and build cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-${{ github.workflow }}-${{ github.job }}-${{ runner.os }}-${{ hashFiles('go.sum', 'mise.lock') }}
+          restore-keys: |
+            go-${{ github.workflow }}-${{ github.job }}-${{ runner.os }}-
 
       - name: Pinned sonar version
         id: sonar
-        run: echo "version=$(go run ./tools/fetch-sonar -print-version)" >> "$GITHUB_OUTPUT"
+        run: echo "version=$(mise run sonar-version)" >> "$GITHUB_OUTPUT"
 
       - name: Cache sonar binary
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -115,19 +148,14 @@ jobs:
           path: internal/sonarcli/bundled/sonar-linux-amd64
           key: sonar-${{ steps.sonar.outputs.version }}-linux-amd64
 
-      # Downloads only on a cache miss; a cached file is re-verified against
+      # test-bundled and build-bundled depend on the fetch-sonar task, which
+      # downloads only on a cache miss and re-verifies a cached file against
       # the SHA-256 compiled into sqa either way.
-      - name: Fetch and verify sonar
-        run: make fetch-sonar
-
-      - name: go vet (bundled)
-        run: go vet -tags bundled_sonar ./...
-
-      - name: Test (bundled)
-        run: go test -race -tags bundled_sonar ./...
+      - name: Fetch sonar, go vet + test (bundled)
+        run: mise run test-bundled
 
       - name: Build bundled binary
-        run: make build-bundled VERSION="ci-${GITHUB_SHA::12}"
+        run: VERSION="ci-${GITHUB_SHA::12}" mise run build-bundled
 
       - name: Smoke test bundled binary
         run: |
@@ -159,11 +187,23 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Go
-        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+      # Installs the tools pinned in mise.toml / mise.lock (`mise install --locked`)
+      # and caches them. The mise binary is verified against its signed checksums.
+      - name: Set up mise
+        uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         with:
-          go-version-file: go.mod
+          version: 2026.11.9
           cache: true
 
+      - name: Cache Go modules and build cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-${{ github.workflow }}-${{ github.job }}-${{ runner.os }}-${{ hashFiles('go.sum', 'mise.lock') }}
+          restore-keys: |
+            go-${{ github.workflow }}-${{ github.job }}-${{ runner.os }}-
+
       - name: govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+        run: mise run vulncheck

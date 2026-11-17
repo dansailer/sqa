@@ -27,14 +27,26 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Go
-        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+      # Installs the tools pinned in mise.toml / mise.lock (`mise install --locked`)
+      # and caches them. The mise binary is verified against its signed checksums.
+      - name: Set up mise
+        uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         with:
-          go-version-file: go.mod
+          version: 2026.11.9
           cache: true
 
+      - name: Cache Go modules and build cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-${{ github.workflow }}-${{ github.job }}-${{ runner.os }}-${{ hashFiles('go.sum', 'mise.lock') }}
+          restore-keys: |
+            go-${{ github.workflow }}-${{ github.job }}-${{ runner.os }}-
+
       - name: Test
-        run: go test -race ./...
+        run: mise run test
 
   build:
     name: Build linux/amd64 (bundled sonar)
@@ -52,16 +64,28 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Go
-        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+      # Installs the tools pinned in mise.toml / mise.lock (`mise install --locked`)
+      # and caches them. The mise binary is verified against its signed checksums.
+      - name: Set up mise
+        uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
         with:
-          go-version-file: go.mod
+          version: 2026.11.9
           cache: true
+
+      - name: Cache Go modules and build cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-${{ github.workflow }}-${{ github.job }}-${{ runner.os }}-${{ hashFiles('go.sum', 'mise.lock') }}
+          restore-keys: |
+            go-${{ github.workflow }}-${{ github.job }}-${{ runner.os }}-
 
       # Always a fresh download for releases (no cache), verified against the
       # SHA-256 compiled into sqa.
       - name: Fetch and verify sonar
-        run: make fetch-sonar
+        run: mise run fetch-sonar
 
       - name: Test embedded sonar
         run: go test -tags bundled_sonar ./internal/sonarcli/
@@ -73,7 +97,7 @@ jobs:
           set -euo pipefail
           version="${TAG#v}"
           name="sqa_${version}_linux_amd64"
-          make build-bundled VERSION="${TAG}" COMMIT="${GITHUB_SHA}"
+          VERSION="${TAG}" COMMIT="${GITHUB_SHA}" mise run build-bundled
           mkdir -p "build/${name}/licenses" dist
           mv sqa "build/${name}/sqa"
           cp LICENSE README.md THIRD_PARTY_NOTICES.md "build/${name}/"
