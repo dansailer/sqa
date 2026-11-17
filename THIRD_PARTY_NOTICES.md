@@ -44,6 +44,5 @@ sonar:
 `sonar.version: "<version>"` plus `sqa setup --sonar-version <version>`
 downloads another official release from SonarSource and uses it instead.
 
-To obtain the corresponding source code, use the repository and tag above. If
-it is ever unavailable there, open an issue at
-https://github.com/dansailer/sqa/issues and a copy will be provided.
+The corresponding source code is published by SonarSource at the repository
+and tag above.
