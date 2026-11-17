@@ -27,6 +27,21 @@ func storeDescription(env *sonarcli.Environment) string {
 	return d
 }
 
+// telemetryDescription says whether sonar may send telemetry and Sentry
+// error reports to SonarSource, and why.
+func telemetryDescription(env *sonarcli.Environment) string {
+	switch {
+	case env.TelemetryOrigin == sonarcli.OriginConfig:
+		return "on (sonar.telemetry: true)"
+	case env.TelemetryOrigin == sonarcli.OriginEnv && env.TelemetryOff:
+		return "off (DO_NOT_TRACK=1 from your environment)"
+	case env.TelemetryOrigin == sonarcli.OriginEnv:
+		return fmt.Sprintf("on (DO_NOT_TRACK=%q from your environment)", os.Getenv(sonarcli.EnvDoNotTrack))
+	default:
+		return "off (sqa sets DO_NOT_TRACK=1; opt in with sonar.telemetry: true)"
+	}
+}
+
 // authSource relabels sonar's "OS Keychain" source when the file store is in
 // use; env-var sources are passed through.
 func authSource(source string, env *sonarcli.Environment) string {

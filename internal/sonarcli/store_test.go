@@ -10,8 +10,8 @@ import (
 	"testing"
 )
 
-func getenv(m map[string]string) func(string) string {
-	return func(k string) string { return m[k] }
+func getenv(m map[string]string) func(string) (string, bool) {
+	return func(k string) (string, bool) { v, ok := m[k]; return v, ok }
 }
 
 func defaults(dir string) Settings {
@@ -214,5 +214,37 @@ func TestRunnerSecuresAfterRun(t *testing.T) {
 	}
 	if m := mode(t, e.CredentialsFile); m != 0o600 {
 		t.Errorf("after run %04o", m)
+	}
+}
+
+func TestTelemetryOffByDefault(t *testing.T) {
+	has := func(env []string, kv string) bool { return slices.Contains(env, kv) }
+	e, _ := ResolveEnvironment(getenv(nil), defaults("/h"))
+	if !e.TelemetryOff || e.TelemetryOrigin != OriginDefault || !has(e.Env([]string{"A=1"}), "DO_NOT_TRACK=1") {
+		t.Fatalf("default: %+v", e)
+	}
+
+	s := defaults("/h")
+	s.Telemetry = true
+	e, _ = ResolveEnvironment(getenv(nil), s)
+	if e.TelemetryOff || e.TelemetryOrigin != OriginConfig {
+		t.Fatalf("opt-in: %+v", e)
+	}
+	for _, kv := range e.Env([]string{"A=1"}) {
+		if strings.HasPrefix(kv, EnvDoNotTrack+"=") {
+			t.Fatalf("opt-in still sets %s", kv)
+		}
+	}
+
+	// Any explicit DO_NOT_TRACK wins over sqa's default and the config, even 0 or empty.
+	for v, off := range map[string]bool{"1": true, " 1 ": true, "0": false, "": false, "true": false} {
+		for _, opt := range []bool{false, true} {
+			s.Telemetry = opt
+			e, _ = ResolveEnvironment(getenv(map[string]string{EnvDoNotTrack: v}), s)
+			base := []string{EnvDoNotTrack + "=" + v}
+			if e.TelemetryOff != off || e.TelemetryOrigin != OriginEnv || !slices.Equal(e.Env(base)[:1], base) || len(e.Env(base)) != 3 {
+				t.Errorf("DO_NOT_TRACK=%q telemetry=%v: %+v env %v", v, opt, e, e.Env(base))
+			}
+		}
 	}
 }

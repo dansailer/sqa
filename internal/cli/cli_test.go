@@ -365,7 +365,7 @@ func TestDoctor(t *testing.T) {
 	}
 	var d doctorResult
 	_ = json.Unmarshal([]byte(out), &d)
-	if !d.OK || len(d.Checks) != 5 {
+	if !d.OK || len(d.Checks) != 6 {
 		t.Fatalf("%+v", d)
 	}
 
@@ -811,5 +811,49 @@ func TestDoctorKeychainHints(t *testing.T) {
 	t.Setenv("FAKE_AUTH_STDERR", "Failed to access the system keychain. Underlying error: The name org.freedesktop.secrets was not provided by any .service files")
 	if _, out, _ := e.run("doctor"); !strings.Contains(out, "gnome-keyring-daemon --unlock") {
 		t.Errorf("secret service hint: %s", out)
+	}
+}
+
+func TestTelemetryShownAndPassed(t *testing.T) {
+	e := newEnv(t)
+	t.Setenv("DO_NOT_TRACK", "") // registers the restore; the variable must be unset, not empty
+	os.Unsetenv("DO_NOT_TRACK")
+	p := filepath.Join(t.TempDir(), "dnt.log")
+	script := filepath.Join(t.TempDir(), "sonar")
+	fake := filepath.Join(e.fixture, "sonar")
+	body := "#!/bin/sh\nprintf '%s|%s\\n' \"$1\" \"${DO_NOT_TRACK-<unset>}\" >>" + p + "\nexec " + fake + " \"$@\"\n"
+	if err := os.WriteFile(script, []byte(body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cfg := filepath.Join(e.home, "config.yaml")
+	write := func(extra string) {
+		if err := os.WriteFile(cfg, []byte("sonar:\n  path: "+script+"\n"+extra), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("")
+	_, out, _ := e.run("doctor", "--format", "table")
+	if !strings.Contains(out, "telemetry    off (sqa sets DO_NOT_TRACK=1") {
+		t.Errorf("doctor: %s", out)
+	}
+	_, out, _ = e.run("version", "--format", "table")
+	if !strings.Contains(out, "sonar telemetry:    off") {
+		t.Errorf("version: %s", out)
+	}
+	write("  telemetry: true\n")
+	_, out, _ = e.run("doctor", "--format", "table")
+	if !strings.Contains(out, "on (sonar.telemetry: true)") {
+		t.Errorf("opt-in doctor: %s", out)
+	}
+	write("")
+	t.Setenv("DO_NOT_TRACK", "0")
+	if code, out, _ := e.run("doctor", "--format", "table"); code != 0 || !strings.Contains(out, `on (DO_NOT_TRACK="0" from your environment)`) {
+		t.Errorf("env 0 doctor: %s", out)
+	}
+	got := strings.Join(readLines(t, p), "\n")
+	for _, want := range []string{"auth|1", "auth|<unset>", "auth|0"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("sonar saw DO_NOT_TRACK %q? log:\n%s", want, got)
+		}
 	}
 }

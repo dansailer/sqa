@@ -208,8 +208,9 @@ func (a *app) sonarEnv() (*sonarcli.Environment, error) {
 	s := sonarcli.Settings{DefaultCredentialsFile: creds, DefaultSonarHome: home}
 	if a.cfg != nil {
 		s.Store, s.CredentialsFile, s.SonarHome = a.cfg.Auth.Store, a.cfg.Auth.CredentialsFile, a.cfg.Sonar.Home
+		s.Telemetry = a.cfg.Sonar.Telemetry
 	}
-	env, err := sonarcli.ResolveEnvironment(os.Getenv, s)
+	env, err := sonarcli.ResolveEnvironment(os.LookupEnv, s)
 	if err != nil {
 		return nil, &ExitError{Code: ExitUsage, Err: err}
 	}
@@ -246,6 +247,9 @@ func (a *app) versionCmd() *cobra.Command {
 				v.BundledVersion = b.Version
 				v.BundledSHA256 = b.SHA256
 			}
+			if env, err := a.sonarEnv(); err == nil {
+				v.Telemetry = telemetryDescription(env)
+			}
 			if rs, err := a.resolver(); err == nil {
 				if loc, err := rs.Locate(); err == nil {
 					v.SonarSource, v.SonarPath = string(loc.Source), loc.Bin
@@ -274,6 +278,7 @@ type versionInfo struct {
 	BundledSHA256  string `json:"sonar_bundled_sha256,omitempty"`
 	SonarSource    string `json:"sonar_source,omitempty"`
 	SonarPath      string `json:"sonar_path,omitempty"`
+	Telemetry      string `json:"sonar_telemetry,omitempty"`
 }
 
 func (v versionInfo) Markdown() string { return v.Table() }
@@ -294,6 +299,9 @@ func (v versionInfo) Table() string {
 		if v.SonarPath != "" {
 			b.WriteString(" (" + v.SonarPath + ")")
 		}
+	}
+	if v.Telemetry != "" {
+		b.WriteString("\nsonar telemetry:    " + v.Telemetry)
 	}
 	return b.String()
 }

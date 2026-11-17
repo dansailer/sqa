@@ -100,6 +100,7 @@ Auth, TLS and proxy: handled by `sonar` (see `sonar config` for proxy/CA setting
 - `SONAR_USER_HOME` = `sonar.home`, default `$XDG_DATA_HOME/sqa/sonar-home`. sqa's own `state.json` never lists `sonar-secrets` (only `sonar integrate`, `analyze secrets` and the git hooks install it, and sqa runs none of them), so `sonar`'s post-upgrade dependency repair never downloads it. Logins made with a standalone `sonar` in `~/.sonar` are not shared.
 - Precedence: a non-empty variable in the user's environment (`sonar` reads it anyway) → `config.yaml` → default. An empty `SONAR_USER_HOME` is replaced, since `sonar` would resolve it against the working directory.
 - Permissions, without reading the file: before each run, sqa's own directories are created or tightened to `0700` (a configured or env-provided parent is created `0700` if missing but never chmodded), and the credentials file is created empty with `O_CREAT|O_EXCL`, mode `0600`, if missing (`sonar` treats an unparsable file as empty). `writeFileSync` truncates an existing file in place and keeps its mode, so the token is never in a world-readable file regardless of umask (verified against the bundled 1.12.0.17622). After each run sqa `chmod`s the file to `0600` again in case anything replaced it. Changing the process umask was rejected: it is process-wide in Go and racy with other goroutines, and the pre-created file makes it unnecessary.
+- `DO_NOT_TRACK=1` unless the user's environment has `DO_NOT_TRACK` at all (passed through as is, even `0` or empty) or `sonar.telemetry: true`. Upstream `isTelemetryEnabled()` (`telemetry.enabled` config and `DO_NOT_TRACK === "1"`) gates event emission, the detached `flush-telemetry` worker, the flush itself and `initSentry()`, so one variable covers usage telemetry (`events.sonardata.io`) and Sentry. The internal `__SQ_CLI_TELEMETRY_EGRESS` switch is not used: it is undocumented and only controls egress, not collection. `doctor` and `version` print the state (`telemetry: off (…)`).
 - `sonar` labels a stored login `OS Keychain` even when it comes from the file; `sqa auth status` and `sqa doctor` relabel it `credentials file` and print the store and home. `doctor` reports (and fixes) wrong permissions before running `sonar`, and maps the two Linux keychain errors (`libsecret could not be loaded`, `org.freedesktop.secrets`) to fixes only when `auth.store: keychain`.
 
 **Config file** `~/.config/sqa/config.yaml` (no secrets, optional):
@@ -113,6 +114,7 @@ sonar:
   version: "1.12.0.17622"     # pinned official CLI version
   path: ""                    # optional override
   home: ""                    # SONAR_USER_HOME, default $XDG_DATA_HOME/sqa/sonar-home
+  telemetry: false            # true: don't set DO_NOT_TRACK=1 for sonar
 skills:
   default_dir: ~/.agents/skills
 ```

@@ -190,6 +190,7 @@ sonar:
   version: "1.12.0.17622"      # sonar CLI version (default: bundled/pinned); another value uses `sqa setup --sonar-version` downloads
   path: ""                     # use this sonar binary instead of the bundled or downloaded one
   home: ""                     # SONAR_USER_HOME for sonar, default ~/.local/share/sqa/sonar-home
+  telemetry: false             # true lets sonar send usage telemetry and Sentry error reports
 skills:
   default_dir: ~/.agents/skills
 ```
@@ -205,6 +206,10 @@ skills:
   before extraction (the embedded bytes), and after writing it to disk. Later
   runs re-hash it whenever its size or modification time changes, and replace
   it if it no longer matches.
+- `sonar`'s usage telemetry (`events.sonardata.io`) and Sentry error reports
+  are **off**: `sqa` runs it with `DO_NOT_TRACK=1` unless you set
+  `DO_NOT_TRACK` yourself (any value is respected) or opt in with
+  `sonar.telemetry: true`. `sqa doctor` and `sqa version` show the state.
 - `sqa` itself makes no network requests, except `sqa setup` downloading a
   non-bundled `sonar` from `binaries.sonarsource.com`. The pinned version is
   checked against SHA-256 digests compiled into `sqa`. For any other version,

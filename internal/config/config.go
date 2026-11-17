@@ -43,6 +43,10 @@ type Sonar struct {
 	// Home is sonar's SONAR_USER_HOME (default $XDG_DATA_HOME/sqa/sonar-home),
 	// kept separate from ~/.sonar so a standalone sonar's state never leaks in.
 	Home string `yaml:"home"`
+	// Telemetry lets sonar send usage telemetry and Sentry error reports to
+	// SonarSource. Off by default: sqa runs sonar with DO_NOT_TRACK=1 unless
+	// DO_NOT_TRACK is already set in the environment.
+	Telemetry bool `yaml:"telemetry"`
 }
 
 // Skills configures `sqa skill install`.

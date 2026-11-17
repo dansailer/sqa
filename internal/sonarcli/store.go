@@ -17,6 +17,9 @@ const (
 	// EnvSonarHome moves sonar's state (state.json, logs, telemetry) out of
 	// ~/.sonar.
 	EnvSonarHome = "SONAR_USER_HOME"
+	// EnvDoNotTrack=1 turns off sonar's usage telemetry (events.sonardata.io)
+	// and its Sentry error reports; both check it (isTelemetryEnabled).
+	EnvDoNotTrack = "DO_NOT_TRACK"
 )
 
 // Store is where sonar keeps the token from `sonar auth login`.
@@ -54,6 +57,11 @@ type Environment struct {
 	CredentialsOrigin Origin
 	SonarHome         string
 	SonarHomeOrigin   Origin
+	// TelemetryOff is whether sonar's telemetry and error reporting are off.
+	// With OriginDefault sqa sets DO_NOT_TRACK=1; with OriginEnv the user's
+	// DO_NOT_TRACK is passed through; OriginConfig means sonar.telemetry: true.
+	TelemetryOff    bool
+	TelemetryOrigin Origin
 }
 
 // Settings are the inputs for ResolveEnvironment.
@@ -61,6 +69,7 @@ type Settings struct {
 	Store                  string // auth.store: "", "file" or "keychain"
 	CredentialsFile        string // auth.credentials_file
 	SonarHome              string // sonar.home
+	Telemetry              bool   // sonar.telemetry: let sonar send telemetry
 	DefaultCredentialsFile string
 	DefaultSonarHome       string
 }
@@ -68,9 +77,20 @@ type Settings struct {
 // ResolveEnvironment applies sqa's precedence: a non-empty variable in the
 // user's environment wins (sonar reads it anyway), then config.yaml, then
 // sqa's defaults. auth.store: keychain leaves the credentials file unset so
-// sonar uses the OS keychain.
-func ResolveEnvironment(getenv func(string) string, s Settings) (*Environment, error) {
+// sonar uses the OS keychain. DO_NOT_TRACK is respected whenever it is set
+// at all (even to 0 or empty); otherwise telemetry is off unless
+// sonar.telemetry is true. lookup is os.LookupEnv outside tests.
+func ResolveEnvironment(lookup func(string) (string, bool), s Settings) (*Environment, error) {
+	getenv := func(k string) string { v, _ := lookup(k); return v }
 	e := &Environment{}
+	switch v, ok := lookup(EnvDoNotTrack); {
+	case ok:
+		e.TelemetryOff, e.TelemetryOrigin = strings.TrimSpace(v) == "1", OriginEnv
+	case s.Telemetry:
+		e.TelemetryOff, e.TelemetryOrigin = false, OriginConfig
+	default:
+		e.TelemetryOff, e.TelemetryOrigin = true, OriginDefault
+	}
 	switch {
 	case getenv(EnvKeychainFile) != "":
 		e.Store, e.CredentialsFile, e.CredentialsOrigin = StoreFile, getenv(EnvKeychainFile), OriginEnv
@@ -113,6 +133,9 @@ func (e *Environment) Env(base []string) []string {
 	if e.SonarHomeOrigin != OriginEnv {
 		set[EnvSonarHome] = e.SonarHome
 	}
+	if e.TelemetryOrigin == OriginDefault {
+		set[EnvDoNotTrack] = "1"
+	}
 	out := make([]string, 0, len(base)+len(set))
 	for _, kv := range base {
 		k, _, _ := strings.Cut(kv, "=")
@@ -121,7 +144,7 @@ func (e *Environment) Env(base []string) []string {
 		}
 		out = append(out, kv)
 	}
-	for _, k := range []string{EnvKeychainFile, EnvSonarHome} {
+	for _, k := range []string{EnvKeychainFile, EnvSonarHome, EnvDoNotTrack} {
 		if v, ok := set[k]; ok {
 			out = append(out, k+"="+v)
 		}

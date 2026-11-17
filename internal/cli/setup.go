@@ -204,6 +204,7 @@ func (a *app) doctorCmd() *cobra.Command {
 				return a.finishDoctor(res, code)
 			}
 			add("sonar home", "ok", fmt.Sprintf("%s (%s)", env.SonarHome, env.SonarHomeOrigin), 0)
+			add("telemetry", "ok", telemetryDescription(env), 0)
 			r := &sonarcli.Runner{Bin: rs.Bin, Env: env}
 			src := sonarSourceDetail(rs)
 			v, err := r.Version(ctx)
