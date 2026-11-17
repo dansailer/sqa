@@ -13,11 +13,14 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# One job: the setup (mise, Go, golangci-lint, modules, sonar) runs once and
+# every check reuses it. Checks after the first run even if an earlier one
+# fails (`!cancelled()`), so a single run reports every failure.
 jobs:
-  lint:
-    name: Lint
+  ci:
+    name: Lint, test, build
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - name: Harden runner
         uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
@@ -37,106 +40,17 @@ jobs:
           version: 2026.11.9
           cache: true
 
-      - name: Cache Go modules and build cache
+      # One shared key: saved once, restored by every later run.
+      - name: Cache Go modules, build and lint caches
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
             ~/.cache/golangci-lint
-          key: go-${{ github.workflow }}-${{ github.job }}-${{ runner.os }}-${{ hashFiles('go.sum', 'mise.lock') }}
+          key: go-${{ runner.os }}-${{ hashFiles('go.sum', 'mise.lock') }}
           restore-keys: |
-            go-${{ github.workflow }}-${{ github.job }}-${{ runner.os }}-
-
-      - name: go vet + golangci-lint
-        run: mise run lint
-
-  test:
-    name: Test
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - name: Harden runner
-        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
-        with:
-          egress-policy: audit
-
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      # Installs the tools pinned in mise.toml / mise.lock (`mise install --locked`)
-      # and caches them. The mise binary is verified against its signed checksums.
-      - name: Set up mise
-        uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
-        with:
-          version: 2026.11.9
-          cache: true
-
-      - name: Cache Go modules and build cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: go-${{ github.workflow }}-${{ github.job }}-${{ runner.os }}-${{ hashFiles('go.sum', 'mise.lock') }}
-          restore-keys: |
-            go-${{ github.workflow }}-${{ github.job }}-${{ runner.os }}-
-
-      - name: Test (race + coverage)
-        run: mise run test -- -covermode=atomic -coverprofile=coverage.out
-
-      - name: Coverage summary
-        run: go tool cover -func=coverage.out | tail -n 1
-
-      - name: Build without bundled sonar (linux/amd64)
-        env:
-          GOOS: linux
-          GOARCH: amd64
-        run: |
-          mise run build
-          rm -f sqa
-
-      - name: Upload coverage
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: coverage
-          path: coverage.out
-          retention-days: 7
-
-  bundled:
-    name: Bundled sonar build
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - name: Harden runner
-        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
-        with:
-          egress-policy: audit
-
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      # Installs the tools pinned in mise.toml / mise.lock (`mise install --locked`)
-      # and caches them. The mise binary is verified against its signed checksums.
-      - name: Set up mise
-        uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
-        with:
-          version: 2026.11.9
-          cache: true
-
-      - name: Cache Go modules and build cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: go-${{ github.workflow }}-${{ github.job }}-${{ runner.os }}-${{ hashFiles('go.sum', 'mise.lock') }}
-          restore-keys: |
-            go-${{ github.workflow }}-${{ github.job }}-${{ runner.os }}-
+            go-${{ runner.os }}-
 
       - name: Pinned sonar version
         id: sonar
@@ -148,16 +62,35 @@ jobs:
           path: internal/sonarcli/bundled/sonar-linux-amd64
           key: sonar-${{ steps.sonar.outputs.version }}-linux-amd64
 
+      - name: go vet + golangci-lint
+        run: mise run lint
+
+      - name: Test (race + coverage)
+        if: ${{ !cancelled() }}
+        run: |
+          mise run test -- -covermode=atomic -coverprofile=coverage.out
+          go tool cover -func=coverage.out | tail -n 1
+
+      - name: Build without bundled sonar
+        if: ${{ !cancelled() }}
+        run: |
+          mise run build
+          rm -f sqa
+
       # test-bundled and build-bundled depend on the fetch-sonar task, which
       # downloads only on a cache miss and re-verifies a cached file against
       # the SHA-256 compiled into sqa either way.
       - name: Fetch sonar, go vet + test (bundled)
+        if: ${{ !cancelled() }}
         run: mise run test-bundled
 
       - name: Build bundled binary
+        id: bundled
+        if: ${{ !cancelled() }}
         run: VERSION="ci-${GITHUB_SHA::12}" mise run build-bundled
 
       - name: Smoke test bundled binary
+        if: ${{ !cancelled() && steps.bundled.outcome == 'success' }}
         run: |
           set -euo pipefail
           HOME="$(mktemp -d)"
@@ -172,38 +105,14 @@ jobs:
         env:
           SONAR_VERSION: ${{ steps.sonar.outputs.version }}
 
-  vulncheck:
-    name: govulncheck
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Harden runner
-        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
-        with:
-          egress-policy: audit
-
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      # Installs the tools pinned in mise.toml / mise.lock (`mise install --locked`)
-      # and caches them. The mise binary is verified against its signed checksums.
-      - name: Set up mise
-        uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
-        with:
-          version: 2026.11.9
-          cache: true
-
-      - name: Cache Go modules and build cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: go-${{ github.workflow }}-${{ github.job }}-${{ runner.os }}-${{ hashFiles('go.sum', 'mise.lock') }}
-          restore-keys: |
-            go-${{ github.workflow }}-${{ github.job }}-${{ runner.os }}-
-
       - name: govulncheck
+        if: ${{ !cancelled() }}
         run: mise run vulncheck
+
+      - name: Upload coverage
+        if: ${{ !cancelled() && hashFiles('coverage.out') != '' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage
+          path: coverage.out
+          retention-days: 7
