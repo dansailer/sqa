@@ -12,8 +12,9 @@ approves, fixes the code or records a triage decision in SonarQube.
 ## Prerequisites
 
 1. Run `sqa doctor`. Continue only if it passes.
-2. If `sqa doctor` reports that `sonar` is missing, tell the user to run
-   `sqa setup`.
+2. Release builds of `sqa` bundle the `sonar` CLI and extract it on first
+   use. If `sqa doctor` still reports that `sonar` is missing or broken,
+   tell the user to run `sqa setup` (or to set `sonar.path`).
 3. If it reports that you are not authenticated, **stop** and ask the user to
    run `sqa auth login --server <their SonarQube URL>` themselves in a
    terminal. You cannot complete that browser flow, and you must not try.

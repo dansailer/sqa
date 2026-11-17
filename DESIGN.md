@@ -15,7 +15,7 @@ A single-binary Go CLI (`sqa`) that lets coding harnesses (Grok, OpenCode, Claud
 | C3 | **No MCP.** Must not install, configure or call any SonarQube MCP server. `sonar integrate` is never run (it installs MCP and hooks). |
 | C4 | **`sqa` never handles tokens.** Authentication is fully delegated to the official CLI: `sonar auth login` (browser flow or `--with-token`, stored in the OS keychain) for interactive use, or `SONARQUBE_CLI_SERVER` + `SONARQUBE_CLI_TOKEN` env vars for CI and headless agents. |
 | C5 | **Human-in-the-loop triage.** Agents must ask the user explicitly before any triage decision; once approved, the agent may execute it. |
-| C6 | Go, single static binary (macOS + Linux, amd64 + arm64). |
+| C6 | Go, single static binary that **contains the official `sonar` CLI** (one download = everything). Release target for now: **Linux amd64 only**; macOS and arm64 builds are temporarily not provided. |
 | C7 | One SonarQube instance (no multi-server profiles). |
 
 ## 3. Why not just use `sonar` directly?
@@ -49,15 +49,16 @@ harness (Grok / OpenCode / Claude / …)
 
 ### 4.1 Bundling the official `sonar` CLI
 
-- `sqa` pins a tested `sonar` version: **1.12.0.17622** (`sonarcli.PinnedVersion`, overridable via `sonar.version` in config or `sqa setup --sonar-version`).
-- `sqa setup` downloads that release from SonarSource's official distribution, the same source as SonarSource's own `install.sh`:
-  `https://binaries.sonarsource.com/Distribution/sonarqube-cli/<version>/<os>/sonarqube-cli-<version>-<platform>.bin`
-  with `<os>/<platform>` = `linux/linux-x86-64`, `linux/linux-arm64`, `macos/macos-arm64`. SonarSource publishes **no macOS x86-64 build**; on Intel Macs `sonar.path` must point to a `sonar` installed another way.
-- Checksums: SonarSource publishes `<binary>.sha256` next to each binary. For the pinned version, the three SHA-256 digests are **compiled into `sqa`**, so a compromised download host cannot serve a matching binary and checksum pair. For any other version, `sqa` fetches the published `.sha256`. The binary is written to a temp file, verified, made executable and atomically renamed to `~/.local/share/sqa/bin/sonar` (XDG_DATA_HOME honoured).
-- Binary resolution order: `sonar.path` from config → managed install → `sonar` on `PATH`.
-- The GitHub releases of `SonarSource/sonarqube-cli` carry no binary assets; the CDN above is the official source.
-- `sqa` always invokes this pinned binary (or `sonar.path` from config) and inherits whatever authentication `sonar` has: the keychain login from `sonar auth login`, or the `SONARQUBE_CLI_*` env vars, which take precedence. `sqa` never reads, stores or prints a token, and never runs `sonar integrate`.
-- Licence: `sonar` is LGPL-3.0. `sqa` does not redistribute it; it is downloaded on `sqa setup`.
+- `sqa` pins a tested `sonar` version: **1.12.0.17622** (`sonarcli.PinnedVersion`), with the SHA-256 SonarSource publishes for each platform binary **compiled into `sqa`** (`pinnedChecksums`).
+- Official source (the same as SonarSource's own `install.sh`): `https://binaries.sonarsource.com/Distribution/sonarqube-cli/<version>/<os>/sonarqube-cli-<version>-<platform>.bin`, checksum at `<binary>.sha256`. The GitHub releases of `SonarSource/sonarqube-cli` carry no binary assets.
+- **Release builds embed it.** `make fetch-sonar` (`tools/fetch-sonar`, reusing `sonarcli.Installer`) downloads the linux-x86-64 binary to `internal/sonarcli/bundled/sonar-linux-amd64` (gitignored, never committed) and verifies it against the compiled-in checksum. `make build-bundled` builds with `-tags bundled_sonar`, which compiles `bundled_on.go` (`//go:embed bundled/sonar-linux-amd64`). The tag is only valid for linux/amd64: on any other target `bundled_unsupported.go` breaks the build on purpose. Without the tag (`go install`, plain `go build`), nothing is embedded and `sqa` behaves as before.
+- **Extraction.** The OS can only exec a file, so on first use `sqa` writes the embedded bytes to `~/.local/share/sqa/bin/sonar-<version>` (`XDG_DATA_HOME` honoured): hash the embedded bytes, write to a temp file in the same directory, fsync, hash the written file, `chmod 0755`, atomic rename. A stamp file `sonar-<version>.verified` records digest, size and mtime; later runs only stat the file and compare (cheap), and re-hash when size or mtime changed, re-extracting on mismatch. Binaries left by other versions (`sonar-<other>`) are removed. The versioned file name means an upgrade never overwrites a binary another `sqa` process is running.
+- **Resolution order:** `sonar.path` from config → bundled (extracted) → `sqa setup` download (`~/.local/share/sqa/bin/sonar`) → `sonar` on `PATH`. Setting `sonar.version` in config to a version other than the bundled one skips the bundle.
+- **`sqa setup`** is optional with a bundled build: it performs (or with `--force` redoes) the extraction, runs `sonar --version` and reports. `sqa setup --sonar-version <v>` with another version downloads that official release (pinned checksum, or the published `.sha256` for other versions) to `~/.local/share/sqa/bin/sonar`, as for non-bundled builds. SonarSource publishes downloads for linux-x86-64, linux-arm64 and macos-arm64 (no macOS x86-64).
+- **`sqa version` / `sqa doctor`** report whether `sonar` is bundled, its version and SHA-256, and which source is in use (`sonar.path`, `bundled`, `sqa setup`, `PATH`). `version` never writes anything; `doctor` extracts if needed.
+- **Updates.** A new `sonar` means a new `sqa` release. `.github/workflows/sonar-update.yml` runs weekly (and on demand), reads `stable.version` from the distribution URL above (what SonarSource's `install.sh` uses to resolve the latest release), and opens an issue with the new version, binary URL and published checksum when it is newer than `PinnedVersion`. It never commits code or binaries; bumping is a reviewed change to `install.go` and `THIRD_PARTY_NOTICES.md` (a test keeps the two in step).
+- `sqa` always invokes this binary (or `sonar.path`) and inherits whatever authentication `sonar` has: the keychain login from `sonar auth login`, or the `SONARQUBE_CLI_*` env vars, which take precedence. `sqa` never reads, stores or prints a token, and never runs `sonar integrate`.
+- **Licence.** `sonar` is LGPL-3.0 (Copyright SonarSource Sàrl). It is redistributed unmodified as a separate executable that `sqa` runs as a child process (not linked). Release archives include `THIRD_PARTY_NOTICES.md` (component, version, copyright, upstream source tag, exact binary URL and SHA-256, how to replace it via `sonar.path`) and `licenses/sonarqube-cli-LGPL-3.0.txt` plus the GPL-3.0 text it incorporates.
 - `sqa` refuses to run `sonar integrate` and `sonar remediate` (guard in `sonarcli.Runner`).
 
 ### 4.2 Web API usage via `sonar api` (only where `sonar` has no dedicated command)
@@ -116,13 +117,13 @@ Multiple servers: out of scope (one internal instance). `sonar` keeps one active
 
 | Command | Description |
 |---------|-------------|
-| `sqa setup` | Install/verify the pinned `sonar` CLI. |
+| `sqa setup` | Optional: extract/verify the bundled `sonar`, or download another official version. |
 | `sqa auth login\|status\|logout` | Thin pass-through to `sonar auth …` (login must be run by the user in a terminal). |
 | `sqa doctor` | Check `sonar` installed and version matches (warn on mismatch), authenticated (`sonar auth status`, shows server and source), server ≥ 2025.1 (or Community Build ≥ 25.1). |
 | `sqa findings` | Unified, ranked list of open issues (`OPEN`, `CONFIRMED`) + `TO_REVIEW` hotspots. Flags: `--project`, `--branch`, `--pr`, `--file`, `--new-code`, `--min-severity`, `--security-only`, `--limit` (default 50, 0 = all), `--fail-on`, `--format`. |
 | `sqa next` | The single highest-priority open finding (for one-at-a-time loops). |
 | `sqa show <key>` | Agent-ready brief: rule, rationale (rule description sections `root_cause` / `assess_the_problem` / `how_to_fix`, or hotspot risk text), location, code context (`--context N`, default 5, HTML stripped), data-flow, possible verdicts, next step. Tries the key as an issue, then as a hotspot. |
-| `sqa version` | sqa version and the pinned `sonar` version. |
+| `sqa version` | sqa version, pinned `sonar` version, whether it is bundled (version, SHA-256) and which `sonar` is in use. |
 
 ### State-changing (require user approval — see §8)
 
@@ -196,33 +197,40 @@ sqa/
 ├── internal/
 │   ├── cli/         # cobra commands, exit codes
 │   ├── config/      # config file, XDG directories
-│   ├── sonarcli/    # pinned sonar install + invocation (list issues, api get/post, auth), output parsing
+│   ├── sonarcli/    # pinned sonar: bundle/extract, download, resolve, invocation, output parsing
+│   │   └── bundled/ # sonar-linux-amd64 fetched at build time (gitignored)
 │   ├── findings/    # normalisation + ranking
 │   ├── approval/    # guardrails + audit log
 │   └── output/      # toon/json/md/table renderers
 ├── skill/SKILL.md   # embedded via go:embed
+├── tools/fetch-sonar/ # download + verify the pinned sonar for bundling
+├── licenses/        # LGPL-3.0 / GPL-3.0 texts for the bundled sonar
+├── THIRD_PARTY_NOTICES.md
+├── Makefile         # fetch-sonar, build-bundled, test-bundled, lint
 ├── testdata/fake/   # fake `sonar` script + recorded API responses
-├── .github/         # CI, CodeQL, release workflows, dependabot
+├── .github/         # CI, CodeQL, release, sonar-update workflows, dependabot
 └── DESIGN.md
 ```
 
-Libraries: `cobra` (commands), `gopkg.in/yaml.v3`, `golang.org/x/term`; no HTTP client for SonarQube, all server traffic via `sonar` (`net/http` is used only by `sqa setup` to download the `sonar` binary). Tests run a fake `sonar` shell script (`testdata/fake/sonar`) that serves recorded responses and logs every invocation, so they assert on the exact `sonar` arguments (e.g. that no `api post` happens without approval).
+Libraries: `cobra` (commands), `gopkg.in/yaml.v3`, `golang.org/x/term`; no HTTP client for SonarQube, all server traffic via `sonar` (`net/http` is used only by `sqa setup` and `tools/fetch-sonar` to download the `sonar` binary). Tests run a fake `sonar` shell script (`testdata/fake/sonar`) that serves recorded responses and logs every invocation, so they assert on the exact `sonar` arguments (e.g. that no `api post` happens without approval).
 
 ## 10a. Build, CI and release
 
-- **CI** (`.github/workflows/ci.yml`, push/PR to `main`): golangci-lint (action cache), `go vet`, `go test -race` with coverage on Linux and macOS, cross-compile check for all four targets, `govulncheck`. `setup-go` module/build cache on every job.
+- **CI** (`.github/workflows/ci.yml`, push/PR to `main`): golangci-lint (action cache), `go vet`, `go test -race` with coverage (ubuntu), an untagged linux/amd64 build, and a **bundled** job: restore the `sonar` binary from `actions/cache` (key: pinned version), `make fetch-sonar` (downloads on a miss, re-verifies the SHA-256 either way), `go vet` and `go test -race` with `-tags bundled_sonar` (includes a test that the embedded bytes match the pinned checksum and that the extracted `sonar --version` runs), `make build-bundled`, smoke test (`sqa version`, `sqa setup`, `sqa doctor` must fail only on auth). `govulncheck`. `setup-go` module/build cache on every job.
 - **CodeQL** (`codeql.yml`): Go, on push/PR and weekly.
-- **Release** (`release.yml`, on tag `v*`): tests, then a 2×2 matrix (`linux`/`darwin` × `amd64`/`arm64`) builds with `CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X …/internal/cli.version=<tag> -X …/internal/cli.commit=<sha>"`, packages `sqa_<version>_<os>_<arch>.tar.gz` (binary, LICENSE, README; reproducible tar flags) and uploads it as a workflow artifact. A final job downloads all archives, generates an SPDX SBOM, writes `checksums.txt` (`sha256sum`), creates build provenance attestations (`actions/attest-build-provenance`) for the archives and checksums, and publishes with `gh release create --generate-notes`. No goreleaser.
+- **Release** (`release.yml`, on tag `v*`): tests, then one linux/amd64 job: fresh `make fetch-sonar` (no cache), embedded-binary test, `make build-bundled` (`CGO_ENABLED=0`, `-trimpath`, `-ldflags "-s -w -X …/internal/cli.version=<tag> -X …/internal/cli.commit=<sha>"`, `-tags bundled_sonar`), smoke test, and packaging of `sqa_<version>_linux_amd64.tar.gz` (single root dir: `sqa`, `LICENSE`, `README.md`, `THIRD_PARTY_NOTICES.md`, `licenses/`; reproducible tar flags). A final job generates an SPDX SBOM, writes `checksums.txt` (`sha256sum`), creates build provenance attestations (`actions/attest-build-provenance`) for the archive and checksums, and publishes with `gh release create --generate-notes`. The asset name contains `linux` and `amd64`, which is what mise's `github:` backend matches. No goreleaser.
+- **sonar update check** (`sonar-update.yml`): weekly + manual, `contents: read` at the top, `issues: write` only on its single job; opens an issue when `stable.version` is newer than the pinned version (see §4.1).
 - **Hardening**: every action pinned to a full commit SHA with a version comment, `permissions: contents: read` at the top, `contents: write` / `id-token: write` / `attestations: write` only on the release job, `persist-credentials: false`, `step-security/harden-runner` (egress audit), timeouts, concurrency groups. Dependabot updates Go modules and actions weekly.
 
 ## 11. Decisions and open questions
 
 Resolved:
 
-1. Licence: `sonar` is LGPL-3.0; `sqa` keeps download-on-setup and does not redistribute it.
+1. Licence and distribution: `sonar` (LGPL-3.0) is bundled unmodified inside the release binary, with `THIRD_PARTY_NOTICES.md` and the licence texts in every archive (§4.1). `sqa setup` remains for non-bundled builds and version overrides.
 2. Pinned `sonar` version: 1.12.0.17622 (stable on 2026-11-17).
 3. Multiple servers: not needed (one internal instance).
 4. Name: `sqa`.
+5. Platforms: release builds are Linux amd64 only for now (macOS/arm64 temporarily not provided).
 
 Open:
 

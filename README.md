@@ -5,8 +5,9 @@ findings from a self-hosted **SonarQube Server 2025.1+**, ranked
 **security first**, and help fix them, while **you approve every triage
 decision**.
 
-- Wraps the official SonarSource [`sonar` CLI](https://github.com/SonarSource/sonarqube-cli).
-  All server traffic goes through it, so `sqa` has no HTTP client for SonarQube
+- Wraps the official SonarSource [`sonar` CLI](https://github.com/SonarSource/sonarqube-cli),
+  which release builds **bundle inside the `sqa` binary**: one download
+  contains everything. All server traffic goes through it, so `sqa` has no HTTP client for SonarQube
   and never reads, stores or prints a token.
 - **No MCP.** `sqa` never installs or calls a SonarQube MCP server and never runs
   `sonar integrate` or `sonar remediate`.
@@ -14,6 +15,15 @@ decision**.
   human-in-the-loop rule.
 
 ## Install
+
+Release binaries are currently built for **Linux amd64 only**. macOS and
+arm64 builds are temporarily not provided (see [From source](#from-source)).
+
+Each release binary contains the official SonarSource `sonar` CLI
+(`1.12.0.17622`, unmodified, LGPL-3.0, see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)). On first use `sqa` extracts
+it to `~/.local/share/sqa/bin/sonar-<version>` and checks its SHA-256, so
+there is nothing else to install and `sqa setup` is optional.
 
 ### With mise (recommended)
 
@@ -23,19 +33,18 @@ build provenance attestation):
 
 ```sh
 mise use -g github:dansailer/sqa
-sqa setup            # install the pinned official sonar CLI (checksum-verified)
 sqa skill install    # ~/.agents/skills/sqa/SKILL.md
 sqa auth login       # you, once, in a terminal (browser login, token goes to the OS keychain)
 ```
 
-To have mise run setup and refresh the skill automatically on every install
-and upgrade, add a `postinstall` hook to the tool entry in your global config
+To have mise refresh the skill automatically on every install and upgrade,
+add a `postinstall` hook to the tool entry in your global config
 (`~/.config/mise/config.toml`):
 
 ```toml
 [tools."github:dansailer/sqa"]
 version = "latest"
-postinstall = '"$MISE_TOOL_INSTALL_PATH/sqa" setup && "$MISE_TOOL_INSTALL_PATH/sqa" skill install'
+postinstall = '"$MISE_TOOL_INSTALL_PATH/sqa" skill install'
 ```
 
 Then run `mise install`. Add `&& "$MISE_TOOL_INSTALL_PATH/sqa" skill install --target claude`
@@ -45,51 +54,58 @@ rerun the hook, so the installed skill always matches the binary.
 > While the repository is private, mise needs a GitHub token to see the
 > releases: `export GITHUB_TOKEN=$(gh auth token)` (or `MISE_GITHUB_TOKEN`).
 
-### Release binaries
+### Release binary
 
-Download the archive for your platform from the
-[releases page](https://github.com/dansailer/sqa/releases) (macOS and Linux,
-amd64 and arm64), verify it, and put `sqa` on your `PATH`:
+Download the archive from the
+[releases page](https://github.com/dansailer/sqa/releases), verify it, and put
+`sqa` on your `PATH`:
 
 ```sh
 VERSION=0.1.0
-OS=darwin    # or linux
-ARCH=arm64   # or amd64
-curl -fsSLO "https://github.com/dansailer/sqa/releases/download/v${VERSION}/sqa_${VERSION}_${OS}_${ARCH}.tar.gz"
+curl -fsSLO "https://github.com/dansailer/sqa/releases/download/v${VERSION}/sqa_${VERSION}_linux_amd64.tar.gz"
 curl -fsSLO "https://github.com/dansailer/sqa/releases/download/v${VERSION}/checksums.txt"
-shasum -a 256 --ignore-missing -c checksums.txt
-gh attestation verify "sqa_${VERSION}_${OS}_${ARCH}.tar.gz" --repo dansailer/sqa   # build provenance
-tar -xzf "sqa_${VERSION}_${OS}_${ARCH}.tar.gz"
-install -m 0755 "sqa_${VERSION}_${OS}_${ARCH}/sqa" ~/.local/bin/sqa
+sha256sum --ignore-missing -c checksums.txt
+gh attestation verify "sqa_${VERSION}_linux_amd64.tar.gz" --repo dansailer/sqa   # build provenance
+tar -xzf "sqa_${VERSION}_linux_amd64.tar.gz"
+install -m 0755 "sqa_${VERSION}_linux_amd64/sqa" ~/.local/bin/sqa
 ```
+
+The archive contains `sqa`, `LICENSE`, `README.md`, `THIRD_PARTY_NOTICES.md`
+and `licenses/` (LGPL-3.0 and GPL-3.0 texts for the bundled `sonar`). The
+binary is about 116 MB because of the bundled `sonar`; the archive is about
+54 MB.
 
 ### From source
 
 ```sh
 go install github.com/dansailer/sqa/cmd/sqa@latest
+sqa setup   # downloads the pinned sonar (Linux x86-64/arm64, macOS arm64)
 ```
 
-### The official `sonar` CLI
-
-```sh
-sqa setup
-```
-
-downloads the pinned `sonar` release (currently `1.12.0.17622`) from
-SonarSource's official distribution
+A plain `go install` build does not bundle `sonar`. `sqa setup` downloads the
+pinned release from SonarSource's official distribution
 (`https://binaries.sonarsource.com/Distribution/sonarqube-cli/`), verifies its
-SHA-256 against the checksum embedded in `sqa`, and installs it to
-`~/.local/share/sqa/bin/sonar`. To use another `sonar` binary, set
-`sonar.path` in the config file. Otherwise `sqa` falls back to `sonar` on your
-`PATH`.
+SHA-256 against the checksum compiled into `sqa`, and installs it to
+`~/.local/share/sqa/bin/sonar`. On Intel Macs, for which SonarSource publishes
+no build, install `sonar` another way and set `sonar.path`. To build the
+bundled Linux amd64 binary yourself: `make build-bundled`.
 
-> SonarSource publishes `sonar` for Linux x86-64/arm64 and macOS arm64 only.
-> On Intel Macs, install `sonar` another way and set `sonar.path`.
+### Which `sonar` is used
+
+1. `sonar.path` from the config file, if set.
+2. The bundled `sonar` (release builds), extracted on first use. Skipped when
+   `sonar.version` in the config names a different version.
+3. The `sonar` installed by `sqa setup` (`~/.local/share/sqa/bin/sonar`).
+4. `sonar` on your `PATH`.
+
+`sqa version` and `sqa doctor` show whether `sonar` is bundled and which one is
+in use. `sqa setup` with a bundled build just extracts and verifies it
+(`--force` re-extracts); `sqa setup --sonar-version <v>` downloads another
+official release, which `sqa` uses once you set `sonar.version: "<v>"`.
 
 ## Quickstart
 
 ```sh
-sqa setup                                              # install the pinned sonar CLI
 sqa auth login --server https://sonarqube.example.com  # you, in a terminal (browser flow, token in the OS keychain)
 sqa doctor                                             # sonar ok, authenticated, server >= 2025.1
 sqa skill install                                      # teach your agents (~/.agents/skills/sqa/SKILL.md)
@@ -108,7 +124,7 @@ keychain.
 
 | Command | What it does |
 | --- | --- |
-| `sqa setup [--force] [--sonar-version V]` | Install the pinned official `sonar` CLI, checksum-verified. |
+| `sqa setup [--force] [--sonar-version V]` | Optional. Extract and verify the bundled `sonar`, or download another official version (checksum-verified). |
 | `sqa doctor` | Check the `sonar` install and version, authentication (`sonar auth status`) and server version (2025.1 or newer). |
 | `sqa auth login\|status\|logout` | Pass-through to `sonar auth …`. Run `login` yourself; agents must not. |
 | `sqa findings` | Open issues and to-review hotspots, ranked security first. Flags: `--project`, `--branch`, `--pr`, `--file`, `--new-code`, `--min-severity`, `--security-only`, `--limit` (default 50, 0 = all), `--fail-on`. |
@@ -118,7 +134,7 @@ keychain.
 | `sqa hotspot <key> safe\|fixed\|acknowledged --comment "…" --approved-by-user [--dry-run]` | Review a hotspot (status `REVIEWED`). |
 | `sqa skill print` | Print the embedded `SKILL.md`. |
 | `sqa skill install [--target agents\|claude\|opencode\|cursor\|<path>] [--project]` | Install the skill. |
-| `sqa version` | Version of `sqa` and the pinned `sonar` CLI. |
+| `sqa version` | Version of `sqa`, the pinned `sonar` CLI, whether it is bundled, and which `sonar` is in use. |
 
 Every command takes `--format toon|json|md|table`. The default is `table`
 when stdout is a terminal and [TOON](https://github.com/toon-format/toon) (compact,
@@ -184,8 +200,8 @@ location with `SQA_CONFIG`; `XDG_*` directories are honoured):
 ```yaml
 default_project: my-service    # used when --project is omitted (else sonar auto-detects)
 sonar:
-  version: "1.12.0.17622"      # sonar CLI version for `sqa setup` (default: pinned)
-  path: ""                     # use this sonar binary instead of the managed one
+  version: "1.12.0.17622"      # sonar CLI version (default: bundled/pinned); another value uses `sqa setup --sonar-version` downloads
+  path: ""                     # use this sonar binary instead of the bundled or downloaded one
 skills:
   default_dir: ~/.agents/skills
 ```
@@ -194,10 +210,15 @@ skills:
 
 - Tokens are handled only by `sonar`, which stores them in the OS keychain or
   reads `SONARQUBE_CLI_*` env vars. `sqa` never reads, logs or prints them.
-- The only network access `sqa` does itself is `sqa setup` downloading the
-  `sonar` binary from `binaries.sonarsource.com`. The pinned version is checked
-  against SHA-256 digests compiled into `sqa`. For any other version, the
-  checksum is fetched from SonarSource's published `.sha256` file.
+- The bundled `sonar` is verified three times: at build time (`make
+  fetch-sonar` checks the download against the SHA-256 compiled into `sqa`),
+  before extraction (the embedded bytes), and after writing it to disk. Later
+  runs re-hash it whenever its size or modification time changes, and replace
+  it if it no longer matches.
+- `sqa` itself makes no network requests, except `sqa setup` downloading a
+  non-bundled `sonar` from `binaries.sonarsource.com`. The pinned version is
+  checked against SHA-256 digests compiled into `sqa`. For any other version,
+  the checksum is fetched from SonarSource's published `.sha256` file.
 - `sqa` refuses to run `sonar integrate` (installs MCP servers and hooks) and
   `sonar remediate`.
 - Release archives come with `checksums.txt`, an SPDX SBOM and GitHub build
@@ -207,20 +228,26 @@ skills:
 ## Development
 
 ```sh
-go test -race ./...
-go vet ./...
-golangci-lint run
+make test            # go test -race ./...
+make lint            # go vet + golangci-lint
+make fetch-sonar     # download + verify the pinned sonar (linux/amd64)
+make test-bundled    # tests with -tags bundled_sonar
+make build-bundled   # ./sqa with sonar embedded
 ```
 
 Tests run against a fake `sonar` script and recorded SonarQube responses in
 `testdata/fake/`. Releases are cut by pushing a `v*` tag. The release workflow
-builds the four targets with `go build` (`CGO_ENABLED=0`, `-trimpath`, version
-injected with `-ldflags`), packages them as `tar.gz`, and publishes them with
-`gh release create`.
+fetches and verifies `sonar`, builds linux/amd64 with `-tags bundled_sonar`
+(`CGO_ENABLED=0`, `-trimpath`, version injected with `-ldflags`), packages it
+as `tar.gz`, and publishes it with `gh release create`. A weekly workflow
+(`sonar-update.yml`) checks SonarSource's `stable.version` and opens an issue
+when a newer `sonar` is available.
 
 See [DESIGN.md](DESIGN.md) for the design.
 
 ## License
 
-MIT. The `sonar` CLI downloaded by `sqa setup` is SonarSource's and is licensed
-under LGPL-3.0. `sqa` downloads it at setup time and does not redistribute it.
+`sqa` is MIT licensed. The bundled `sonar` CLI is SonarSource's, licensed under
+LGPL-3.0 and redistributed unmodified; see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for its source, checksum and
+how to replace it with your own build (`sonar.path`).
