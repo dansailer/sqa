@@ -21,7 +21,7 @@ Run `sqa doctor` first. If it fails, stop and relay its fix to the user.
 - Never run `sonar auth login`, `sqa auth login` or `sqa auth logout` yourself.
   The user handles authentication.
 - Never set, read, print, echo or store a token, and never touch the
-  `SONARQUBE_CLI_TOKEN` variable or the keychain.
+  `SONARQUBE_CLI_TOKEN` variable, `credentials.json` or the keychain.
 - **Always ask before any triage decision** (see "Human in the loop").
 - Never mark a finding as false positive or accepted to reduce the count or
   to make a quality gate pass. Every decision needs a real justification.

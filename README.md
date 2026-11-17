@@ -9,6 +9,8 @@ decision**.
   which release builds **bundle inside the `sqa` binary**: one download
   contains everything. All server traffic goes through it, so `sqa` has no HTTP client for SonarQube
   and never reads, stores or prints a token.
+- Keeps your login in a `0600` credentials file, like `terraform login` or
+  `oc login`, so Linux needs no keychain (libsecret) setup.
 - **No MCP.** `sqa` never installs or calls a SonarQube MCP server and never runs
   `sonar integrate` or `sonar remediate`.
 - Ships a harness-neutral `SKILL.md` that teaches agents the triage order and the
@@ -31,7 +33,7 @@ verifies the download against `checksums.txt`, and installs the skill:
 
 ```sh
 mise use -g --postinstall "sqa skill install" github:dansailer/sqa
-sqa auth login       # you, once, in a terminal (browser login, token goes to the OS keychain)
+sqa auth login --server https://sonarqube.example.com  # you, once, in a terminal
 ```
 
 mise saves the hook in `~/.config/mise/config.toml`, so `mise upgrade` reinstalls
@@ -58,7 +60,7 @@ official release, which `sqa` uses once you set `sonar.version: "<v>"`.
 ## Quickstart
 
 ```sh
-sqa auth login --server https://sonarqube.example.com  # you, in a terminal (browser flow, token in the OS keychain)
+sqa auth login --server https://sonarqube.example.com  # you, in a terminal (browser flow)
 sqa doctor                                             # sonar ok, authenticated, server >= 2025.1
 sqa skill install                                      # teach your agents (~/.agents/skills/sqa/SKILL.md)
 
@@ -68,16 +70,45 @@ sqa next                                               # the single most importa
 sqa show AYx1z2                                        # rule, why, code context, how to fix
 ```
 
-For CI or headless runs, skip `auth login` and set `SONARQUBE_CLI_SERVER` and
-`SONARQUBE_CLI_TOKEN`. `sonar` reads them and they take precedence over the
-keychain.
+## Authentication
+
+`sqa auth login` runs the official `sonar auth login` (browser flow, or
+`--with-token` to paste a token on stdin). `sonar` writes the token; `sqa`
+only tells it where and never opens the file itself.
+
+- **File store (default).** The token is kept in
+  `~/.config/sqa/credentials.json` (`$XDG_CONFIG_HOME/sqa/`), plain-text JSON
+  with mode `0600` in a `0700` directory, the same model as
+  `~/.terraform.d/credentials.tfrc.json` or `~/.kube/config`. `sqa` creates the
+  file with `0600` before `sonar` first writes to it and re-checks the mode
+  after every `sonar` run; `sqa doctor` reports and fixes wrong permissions.
+  Override the path with `auth.credentials_file`.
+- **OS keychain (opt-in).** Set `auth.store: keychain` to use macOS Keychain,
+  Windows Credential Manager or the Linux Secret Service. On Linux that needs
+  libsecret and a running keyring, e.g. on Debian/Ubuntu
+  `sudo apt install libsecret-1-0 gnome-keyring dbus-user-session`, then log
+  out and back in. Over SSH or WSL, start a session with
+  `dbus-run-session -- bash` and run
+  `gnome-keyring-daemon --unlock --components=secrets` first.
+- **Environment variables (CI, headless).** Skip `auth login` and set
+  `SONARQUBE_CLI_SERVER` and `SONARQUBE_CLI_TOKEN`. `sonar` reads them and they
+  take precedence over any stored login.
+
+`sqa` runs `sonar` with its own home directory
+(`~/.local/share/sqa/sonar-home`, override with `sonar.home`) instead of
+`~/.sonar`, so a login made with a standalone `sonar` is not picked up: run
+`sqa auth login` once. This also keeps `sonar` from downloading the
+`sonar-secrets` scanner (see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)).
+If you set `SONARQUBE_CLI_KEYCHAIN_FILE` or `SONAR_USER_HOME` yourself, `sqa`
+uses your values. `sqa auth status` and `sqa doctor` show the token store and
+`sonar` home in use.
 
 ## Commands
 
 | Command | What it does |
 | --- | --- |
 | `sqa setup [--force] [--sonar-version V]` | Optional. Extract and verify the bundled `sonar`, or download another official version (checksum-verified). |
-| `sqa doctor` | Check the `sonar` install and version, authentication (`sonar auth status`) and server version (2025.1 or newer). |
+| `sqa doctor` | Check the token store (path, permissions), `sonar` home, the `sonar` install and version, authentication (`sonar auth status`) and server version (2025.1 or newer). |
 | `sqa auth login\|status\|logout` | Pass-through to `sonar auth …`. Run `login` yourself; agents must not. |
 | `sqa findings` | Open issues and to-review hotspots, ranked security first. Flags: `--project`, `--branch`, `--pr`, `--file`, `--new-code`, `--min-severity`, `--security-only`, `--limit` (default 50, 0 = all), `--fail-on`. |
 | `sqa next` | The highest-priority finding (same filters). |
@@ -147,21 +178,28 @@ The CLI enforces what it can:
 ## Configuration
 
 `~/.config/sqa/config.yaml` is optional and never holds secrets (override the
-location with `SQA_CONFIG`; `XDG_*` directories are honoured):
+location with `SQA_CONFIG`; `XDG_*` directories are honoured). The token lives
+in `credentials.json` next to it, written by `sonar`:
 
 ```yaml
 default_project: my-service    # used when --project is omitted (else sonar auto-detects)
+auth:
+  store: file                  # file (default) or keychain
+  credentials_file: ""         # default ~/.config/sqa/credentials.json
 sonar:
   version: "1.12.0.17622"      # sonar CLI version (default: bundled/pinned); another value uses `sqa setup --sonar-version` downloads
   path: ""                     # use this sonar binary instead of the bundled or downloaded one
+  home: ""                     # SONAR_USER_HOME for sonar, default ~/.local/share/sqa/sonar-home
 skills:
   default_dir: ~/.agents/skills
 ```
 
 ## Security notes
 
-- Tokens are handled only by `sonar`, which stores them in the OS keychain or
-  reads `SONARQUBE_CLI_*` env vars. `sqa` never reads, logs or prints them.
+- Tokens are handled only by `sonar`, which stores them in sqa's `0600`
+  credentials file (or the OS keychain with `auth.store: keychain`) or reads
+  `SONARQUBE_CLI_*` env vars. `sqa` only manages the file's path and
+  permissions and never reads, logs or prints a token.
 - The bundled `sonar` is verified three times: at build time (`mise run
   fetch-sonar` checks the download against the SHA-256 compiled into `sqa`),
   before extraction (the embedded bytes), and after writing it to disk. Later

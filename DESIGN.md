@@ -13,7 +13,7 @@ A single-binary Go CLI (`sqa`) that lets coding harnesses (Grok, OpenCode, Claud
 | C1 | Targets internally hosted **SonarQube Server 2025.1+**. |
 | C2 | **Contains / builds on the official SonarSource `sonar` CLI** ([SonarSource/sonarqube-cli](https://github.com/SonarSource/sonarqube-cli)). |
 | C3 | **No MCP.** Must not install, configure or call any SonarQube MCP server. `sonar integrate` is never run (it installs MCP and hooks). |
-| C4 | **`sqa` never handles tokens.** Authentication is fully delegated to the official CLI: `sonar auth login` (browser flow or `--with-token`, stored in the OS keychain) for interactive use, or `SONARQUBE_CLI_SERVER` + `SONARQUBE_CLI_TOKEN` env vars for CI and headless agents. |
+| C4 | **`sqa` never handles tokens.** Authentication is fully delegated to the official CLI: `sonar auth login` (browser flow or `--with-token`; `sonar` stores the token in sqa's `0600` credentials file, or the OS keychain on request) for interactive use, or `SONARQUBE_CLI_SERVER` + `SONARQUBE_CLI_TOKEN` env vars for CI and headless agents. |
 | C5 | **Human-in-the-loop triage.** Agents must ask the user explicitly before any triage decision; once approved, the agent may execute it. |
 | C6 | Go, single static binary that **contains the official `sonar` CLI** (one download = everything). Release target for now: **Linux amd64 only**; macOS and arm64 builds are temporarily not provided. |
 | C7 | One SonarQube instance (no multi-server profiles). |
@@ -57,7 +57,7 @@ harness (Grok / OpenCode / Claude / …)
 - **`sqa setup`** is optional with a bundled build: it performs (or with `--force` redoes) the extraction, runs `sonar --version` and reports. `sqa setup --sonar-version <v>` with another version downloads that official release (pinned checksum, or the published `.sha256` for other versions) to `~/.local/share/sqa/bin/sonar`, as for non-bundled builds. SonarSource publishes downloads for linux-x86-64, linux-arm64 and macos-arm64 (no macOS x86-64).
 - **`sqa version` / `sqa doctor`** report whether `sonar` is bundled, its version and SHA-256, and which source is in use (`sonar.path`, `bundled`, `sqa setup`, `PATH`). `version` never writes anything; `doctor` extracts if needed.
 - **Updates.** A new `sonar` means a new `sqa` release. `.github/workflows/sonar-update.yml` runs weekly (and on demand), reads `stable.version` from the distribution URL above (what SonarSource's `install.sh` uses to resolve the latest release), and opens an issue with the new version, binary URL and published checksum when it is newer than `PinnedVersion`. It never commits code or binaries; bumping is a reviewed change to `install.go` and `THIRD_PARTY_NOTICES.md` (a test keeps the two in step).
-- `sqa` always invokes this binary (or `sonar.path`) and inherits whatever authentication `sonar` has: the keychain login from `sonar auth login`, or the `SONARQUBE_CLI_*` env vars, which take precedence. `sqa` never reads, stores or prints a token, and never runs `sonar integrate`.
+- `sqa` always invokes this binary (or `sonar.path`) with sqa's token store and `sonar` home (§5), and inherits the `SONARQUBE_CLI_*` env vars, which take precedence over a stored login. `sqa` never reads, stores or prints a token, and never runs `sonar integrate`.
 - **Licence.** `sonar` is LGPL-3.0 (Copyright SonarSource Sàrl). It is redistributed unmodified as a separate executable that `sqa` runs as a child process (not linked). Release archives include `THIRD_PARTY_NOTICES.md` (component, version, copyright, upstream source tag, exact binary URL and SHA-256, how to replace it via `sonar.path`) and `licenses/sonarqube-cli-LGPL-3.0.txt` plus the GPL-3.0 text it incorporates.
 - `sqa` refuses to run `sonar integrate` and `sonar remediate` (guard in `sonarcli.Runner`).
 
@@ -90,17 +90,29 @@ Auth, TLS and proxy: handled by `sonar` (see `sonar config` for proxy/CA setting
 
 ## 5. Authentication and configuration
 
-**Interactive (developer machine):** the user runs `sqa auth login --server https://sonarqube.internal.example`, which simply execs `sonar auth login --server …` attached to the terminal (browser flow; token stored in the OS keychain). Agents cannot complete the browser flow, which is fine: the user logs in once, agents then reuse it. `sqa auth logout` passes through likewise. `sqa auth status` runs `sonar auth status --format json` and renders it (exit 3 when not connected).
+**Interactive (developer machine):** the user runs `sqa auth login --server https://sonarqube.internal.example`, which simply execs `sonar auth login --server …` attached to the terminal (browser flow, or `--with-token` reading stdin). Agents cannot complete the browser flow, which is fine: the user logs in once, agents then reuse it. `sqa auth logout` passes through likewise. `sqa auth status` runs `sonar auth status --format json` and renders it (exit 3 when not connected).
 
-**Headless (CI, containers):** set `SONARQUBE_CLI_SERVER` and `SONARQUBE_CLI_TOKEN`; these override the keychain login.
+**Headless (CI, containers):** set `SONARQUBE_CLI_SERVER` and `SONARQUBE_CLI_TOKEN`; these override any stored login.
+
+**Token store.** `sonar` keeps logins in the OS keychain via `Bun.secrets` unless `SONARQUBE_CLI_KEYCHAIN_FILE` names a JSON file (`{"tokens": {"<host>": "<token>"}}`, written with `writeFileSync`). On Linux the keychain needs libsecret plus a running Secret Service, which servers, WSL and SSH sessions usually lack, so `sqa` defaults to the file, like `terraform login` and `oc login`. `sonarcli.Environment` owns this; every `sonar` child process gets it (`Runner.Env`):
+
+- `SONARQUBE_CLI_KEYCHAIN_FILE` = `auth.credentials_file`, default `$XDG_CONFIG_HOME/sqa/credentials.json`. Not set with `auth.store: keychain`.
+- `SONAR_USER_HOME` = `sonar.home`, default `$XDG_DATA_HOME/sqa/sonar-home`. sqa's own `state.json` never lists `sonar-secrets` (only `sonar integrate`, `analyze secrets` and the git hooks install it, and sqa runs none of them), so `sonar`'s post-upgrade dependency repair never downloads it. Logins made with a standalone `sonar` in `~/.sonar` are not shared.
+- Precedence: a non-empty variable in the user's environment (`sonar` reads it anyway) → `config.yaml` → default. An empty `SONAR_USER_HOME` is replaced, since `sonar` would resolve it against the working directory.
+- Permissions, without reading the file: before each run, sqa's own directories are created or tightened to `0700` (a configured or env-provided parent is created `0700` if missing but never chmodded), and the credentials file is created empty with `O_CREAT|O_EXCL`, mode `0600`, if missing (`sonar` treats an unparsable file as empty). `writeFileSync` truncates an existing file in place and keeps its mode, so the token is never in a world-readable file regardless of umask (verified against the bundled 1.12.0.17622). After each run sqa `chmod`s the file to `0600` again in case anything replaced it. Changing the process umask was rejected: it is process-wide in Go and racy with other goroutines, and the pre-created file makes it unnecessary.
+- `sonar` labels a stored login `OS Keychain` even when it comes from the file; `sqa auth status` and `sqa doctor` relabel it `credentials file` and print the store and home. `doctor` reports (and fixes) wrong permissions before running `sonar`, and maps the two Linux keychain errors (`libsecret could not be loaded`, `org.freedesktop.secrets`) to fixes only when `auth.store: keychain`.
 
 **Config file** `~/.config/sqa/config.yaml` (no secrets, optional):
 
 ```yaml
 default_project: my-service   # optional; otherwise sonar auto-detects / sonar link
+auth:
+  store: file                 # file (default) or keychain
+  credentials_file: ""        # default $XDG_CONFIG_HOME/sqa/credentials.json
 sonar:
   version: "1.12.0.17622"     # pinned official CLI version
   path: ""                    # optional override
+  home: ""                    # SONAR_USER_HOME, default $XDG_DATA_HOME/sqa/sonar-home
 skills:
   default_dir: ~/.agents/skills
 ```
