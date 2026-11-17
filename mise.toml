@@ -8,9 +8,10 @@
 
 [settings]
 lockfile = true
+# Go comes from the toolchain line in go.mod.
+idiomatic_version_file_enable_tools = ["go"]
 
 [tools]
-go = "1.27.4"                               # keep in sync with go.mod
 "aqua:golangci/golangci-lint" = "2.15.0"
 
 [vars]
