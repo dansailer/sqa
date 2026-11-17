@@ -47,9 +47,9 @@ Read-only, run freely:
 | --- | --- |
 | `sqa doctor` | Check that `sonar` is installed, authenticated and that the server is 2025.1+. |
 | `sqa auth status` | Show which SonarQube server `sonar` is connected to (never shows the token). |
-| `sqa findings [--project P] [--branch B \| --pr N] [--file F] [--new-code] [--min-severity S] [--security-only] [--limit N]` | Ranked list of open issues and to-review hotspots. |
-| `sqa next [same filters]` | The single highest-priority finding. |
-| `sqa show <key>` | Full brief: rule, why it matters, location, code context, fix guidance. |
+| `sqa findings [--project P] [--branch B \| --pr N] [--file F] [--new-code] [--min-severity S] [--security-only] [--limit N]` | Ranked overview. Use when the user asks for the list, or to present several at once. |
+| `sqa next [same filters]` | Highest-priority finding with the full brief (rule, why, location, code context, fix guidance). The default way to work one by one. |
+| `sqa show <key>` | Brief for a specific key (one from `findings`, or that the user names). |
 
 State-changing, **only after explicit user approval of that specific finding**:
 
@@ -71,7 +71,7 @@ error, `3` auth or server error, `4` approval missing.
 
 **You recommend, the user decides, then you act.**
 
-1. Run `sqa findings` (or `sqa next`) and `sqa show <key>` for the finding.
+1. Run `sqa next` (it includes the brief; no separate `show` is needed).
 2. Present the finding with your recommended verdict and reasoning, using the
    template below. Verdicts: **fix** in code, **false positive**, **accept**
    (won't fix), and for hotspots **safe**, **fixed** or **acknowledged**.
@@ -108,11 +108,11 @@ Do you approve this? (yes / no / different verdict)
 ## Fix loop
 
 1. Pick the highest-ranked finding the user approved for fixing.
-2. Read `sqa show <key>` and the surrounding code; make the smallest correct
-   fix. Do not suppress the rule with comments or annotations unless the user
-   explicitly approved that.
+2. Use the brief from `sqa next` (or `sqa show <key>`) and the surrounding
+   code; make the smallest correct fix. Do not suppress the rule with comments
+   or annotations unless the user explicitly approved that.
 3. Run the project's tests and linters.
 4. Show the user the change.
 5. SonarQube only updates after a new analysis (CI or the user's usual scan).
    After it runs, verify with `sqa show <key>` or `sqa findings`.
-6. Move to the next finding and present it before touching it.
+6. Run `sqa next` again and present that finding before touching it.

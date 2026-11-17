@@ -135,7 +135,7 @@ Multiple servers: out of scope (one internal instance). `sonar` keeps one active
 | `sqa auth login\|status\|logout` | Thin pass-through to `sonar auth …` (login must be run by the user in a terminal). |
 | `sqa doctor` | Check `sonar` installed and version matches (warn on mismatch), authenticated (`sonar auth status`, shows server and source), server ≥ 2025.1 (or Community Build ≥ 25.1). |
 | `sqa findings` | Unified, ranked list of open issues (`OPEN`, `CONFIRMED`) + `TO_REVIEW` hotspots. Flags: `--project`, `--branch`, `--pr`, `--file`, `--new-code`, `--min-severity`, `--security-only`, `--limit` (default 50, 0 = all), `--fail-on`, `--format`. |
-| `sqa next` | The single highest-priority open finding (for one-at-a-time loops). |
+| `sqa next` | The highest-priority open finding, with the same brief as `sqa show` (for one-at-a-time loops). |
 | `sqa show <key>` | Agent-ready brief: rule, rationale (rule description sections `root_cause` / `assess_the_problem` / `how_to_fix`, or hotspot risk text), location, code context (`--context N`, default 5, HTML stripped), data-flow, possible verdicts, next step. Tries the key as an issue, then as a hotspot. |
 | `sqa version` | sqa version, pinned `sonar` version, whether it is bundled (version, SHA-256) and which `sonar` is in use. |
 
@@ -177,7 +177,7 @@ Principle: **the agent recommends, the user decides, then the agent executes.**
 
 Workflow the skill enforces:
 
-1. Agent runs `sqa findings` / `sqa next` and `sqa show <key>`.
+1. Agent runs `sqa next` (includes the brief). Use `sqa findings` for an overview and `sqa show <key>` for a named key.
 2. Agent presents each finding to the user with a **recommended verdict** (fix in code, false positive, accept, or for hotspots safe / fixed / acknowledged) and the reasoning.
 3. Agent **stops and asks explicitly**. No action without a clear yes for that specific finding.
 4. After approval:
@@ -198,7 +198,7 @@ Frontmatter: `name: sqa`, `description: …`. Content:
 
 - What `sqa` is; prerequisite: `sqa doctor` must pass; the user (not the agent) runs `sqa auth login`.
 - **Hard rules**: never use, install or configure a SonarQube MCP server; never run `sonar integrate`; never run `sonar auth login` (the user does that); never set, read or print tokens; always ask the user before any triage decision.
-- Triage order (§7) and how to read `findings` / `show` output.
+- Triage order (§7) and how to read `next` / `findings` / `show` output.
 - The fix loop: pick approved finding → fix → run tests → (re-scan via CI or `sonar` analysis if available) → re-check with `sqa show <key>`.
 - How to present a recommendation and ask for approval (template), and that approval covers only the presented findings.
 - Never mark something FP/accepted just to reduce counts; justify every decision in the comment.

@@ -191,14 +191,57 @@ func TestFindingsDefaultFormatIsTOONWhenPiped(t *testing.T) {
 
 func TestNext(t *testing.T) {
 	e := newEnv(t)
-	code, out, _ := e.run("next", "--format", "json")
+	code, out, stderr := e.run("next", "--format", "json")
 	if code != 0 {
-		t.Fatal(code)
+		t.Fatalf("exit %d %s", code, stderr)
 	}
 	var n NextResult
-	_ = json.Unmarshal([]byte(out), &n)
-	if n.Finding == nil || n.Finding.Key != "AX-VULN" || n.Remaining != 6 {
+	if err := json.Unmarshal([]byte(out), &n); err != nil {
+		t.Fatal(err, out)
+	}
+	if n.Finding == nil || n.Finding.Key != "AX-VULN" || n.Remaining != 6 || n.Project != "demo" {
 		t.Fatalf("%+v", n)
+	}
+	if n.Brief == nil {
+		t.Fatal("missing brief")
+	}
+	if n.Brief.Key != "AX-VULN" || n.Brief.RuleName == "" || n.Brief.Language != "Go" {
+		t.Errorf("brief header: %+v", n.Brief)
+	}
+	if !strings.Contains(n.Brief.Why, "untrusted data & executes") || !strings.Contains(n.Brief.HowToFix, "parameterized") {
+		t.Errorf("rule text: why=%q fix=%q", n.Brief.Why, n.Brief.HowToFix)
+	}
+	if len(n.Brief.Code) != 3 || !n.Brief.Code[1].Focus || !strings.Contains(n.Brief.Code[1].Code, `"SELECT`) {
+		t.Errorf("code: %+v", n.Brief.Code)
+	}
+	if !strings.Contains(n.Hint, "recommended verdict") || strings.Contains(n.Hint, "sqa show") {
+		t.Errorf("hint: %s", n.Hint)
+	}
+
+	code, out, stderr = e.run("next", "--format", "table")
+	if code != 0 {
+		t.Fatalf("table exit %d %s", code, stderr)
+	}
+	for _, must := range []string{"[1 of 6] demo", "untrusted data & executes", "parameterized", `"SELECT`, "vulnerability", "BLOCKER"} {
+		if !strings.Contains(out, must) {
+			t.Errorf("table missing %q:\n%s", must, out)
+		}
+	}
+
+	var sawIssue, sawRule, sawLines bool
+	for _, c := range e.calls() {
+		if strings.HasPrefix(c, "api get /api/issues/search") && strings.Contains(c, "issues=AX-VULN") {
+			sawIssue = true
+		}
+		if strings.HasPrefix(c, "api get /api/rules/show") {
+			sawRule = true
+		}
+		if strings.HasPrefix(c, "api get /api/sources/lines") {
+			sawLines = true
+		}
+	}
+	if !sawIssue || !sawRule || !sawLines {
+		t.Errorf("brief fetches missing (issue=%v rule=%v lines=%v): %v", sawIssue, sawRule, sawLines, e.calls())
 	}
 }
 

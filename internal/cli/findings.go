@@ -253,34 +253,38 @@ type NextResult struct {
 	Project   string            `json:"project"`
 	Remaining int               `json:"remaining"`
 	Finding   *findings.Finding `json:"finding"`
+	Brief     *Brief            `json:"brief,omitempty"`
 	Hint      string            `json:"hint"`
 }
 
-// Markdown renders the next finding.
+// Markdown renders the next finding and its brief.
 func (n NextResult) Markdown() string { return n.Table() }
 
-// Table renders the next finding.
+// Table renders a rank header, then the same brief as `sqa show`.
 func (n NextResult) Table() string {
 	if n.Finding == nil {
 		return "No open findings in " + n.Project + "."
 	}
-	f := n.Finding
-	return fmt.Sprintf("[%d of %d] %s · %s · %s  (key: %s, %s)\nWhere: %s  (new code: %s)\nWhat:  %s\n\n%s",
-		f.Rank, n.Remaining, f.Category, f.SeverityStr, f.Rule, f.Key, f.Kind, loc(*f), yesNo(f.NewCode), f.Message, n.Hint)
+	header := fmt.Sprintf("[%d of %d] %s  (new code: %s)", n.Finding.Rank, n.Remaining, n.Project, yesNo(n.Finding.NewCode))
+	if n.Brief == nil {
+		return header
+	}
+	return header + "\n\n" + n.Brief.Markdown()
 }
 
 func (a *app) nextCmd() *cobra.Command {
 	var s scopeFlags
 	cmd := &cobra.Command{
 		Use:   "next",
-		Short: "Show the single highest-priority open finding",
+		Short: "Show the highest-priority open finding, with the full brief",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			r, err := a.runner()
 			if err != nil {
 				return err
 			}
-			res, err := a.gather(cmd.Context(), r, s)
+			ctx := cmd.Context()
+			res, err := a.gather(ctx, r, s)
 			if err != nil {
 				return err
 			}
@@ -288,7 +292,12 @@ func (a *app) nextCmd() *cobra.Command {
 			if len(res.Findings) > 0 {
 				f := res.Findings[0]
 				n.Finding = &f
-				n.Hint = "Run `sqa show " + f.Key + "`, then present it to the user with a recommended verdict and ask for approval before acting."
+				b, err := loadBrief(ctx, r, f.Key, defaultContextLines, s.branch, s.pr)
+				if err != nil {
+					return err
+				}
+				n.Brief = &b
+				n.Hint = "Present this finding with a recommended verdict and ask the user before acting."
 			}
 			return a.out(n)
 		},

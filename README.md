@@ -66,8 +66,8 @@ sqa skill install                                      # teach your agents (~/.a
 
 cd my-service
 sqa findings --project my-service                      # ranked list
-sqa next                                               # the single most important finding
-sqa show AYx1z2                                        # rule, why, code context, how to fix
+sqa next                                               # highest-priority finding with full brief
+sqa show AYx1z2                                        # brief for a specific key
 ```
 
 ## Authentication
@@ -111,7 +111,7 @@ uses your values. `sqa auth status` and `sqa doctor` show the token store and
 | `sqa doctor` | Check the token store (path, permissions), `sonar` home, the `sonar` install and version, authentication (`sonar auth status`) and server version (2025.1 or newer). |
 | `sqa auth login\|status\|logout` | Pass-through to `sonar auth …`. Run `login` yourself; agents must not. |
 | `sqa findings` | Open issues and to-review hotspots, ranked security first. Flags: `--project`, `--branch`, `--pr`, `--file`, `--new-code`, `--min-severity`, `--security-only`, `--limit` (default 50, 0 = all), `--fail-on`. |
-| `sqa next` | The highest-priority finding (same filters). |
+| `sqa next` | Highest-priority finding, with the same brief as `sqa show` (same filters). |
 | `sqa show <key> [--context N] [--branch B\|--pr N]` | Agent-ready brief for an issue or hotspot. |
 | `sqa mark <issue-key> fp\|accept\|reopen --comment "…" --approved-by-user [--dry-run]` | Transition an issue and add a `[sqa]` comment. |
 | `sqa hotspot <key> safe\|fixed\|acknowledged --comment "…" --approved-by-user [--dry-run]` | Review a hotspot (status `REVIEWED`). |

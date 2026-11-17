@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -85,7 +86,10 @@ func (b Brief) Markdown() string {
 // Table renders the brief for a terminal.
 func (b Brief) Table() string { return b.Markdown() }
 
-const maxSection = 6000
+const (
+	defaultContextLines = 5
+	maxSection          = 6000
+)
 
 func clipSection(s string) string {
 	if len(s) <= maxSection {
@@ -141,6 +145,74 @@ func flowSteps(flows []sonarcli.Flow, comps []sonarcli.Component) []FlowStep {
 	return out
 }
 
+func loadBrief(ctx context.Context, r *sonarcli.Runner, key string, contextLines int, branch, pr string) (Brief, error) {
+	var b Brief
+	var component string
+	var tr *sonarcli.TextRange
+	var rule *sonarcli.Rule
+
+	issue, comps, err := r.GetIssue(ctx, key)
+	if err != nil {
+		return b, err
+	}
+	if issue != nil {
+		f := findings.FromIssue(*issue, comps, false)
+		b = Brief{Key: key, Kind: string(f.Kind), Category: f.Category, Severity: f.SeverityStr, Quality: f.Quality,
+			Status: f.Status, Rule: issue.Rule, File: f.File, Line: f.Line, Message: issue.Message,
+			Flows: flowSteps(issue.Flows, comps), Verdicts: []string{"fix", "fp", "accept"}}
+		component, tr = issue.Component, issue.TextRange
+		rule, _ = r.ShowRule(ctx, issue.Rule)
+		b.Why, b.Assess, b.HowToFix = ruleSections(rule, issue.RuleDescriptionCtx)
+	} else {
+		h, err := r.ShowHotspot(ctx, key)
+		if err != nil {
+			var se *sonarcli.Error
+			if errors.As(err, &se) && strings.Contains(se.Stderr, "404") {
+				return b, usageErr("no issue or hotspot with key %q", key)
+			}
+			return b, err
+		}
+		f := findings.FromHotspot(sonarcli.Hotspot{Key: h.Key, Component: h.Component.Key, RuleKey: h.Rule.Key,
+			VulnerabilityProbability: h.Rule.VulnerabilityProbability, Status: h.Status, Line: h.Line, Message: h.Message, TextRange: h.TextRange},
+			[]sonarcli.Component{h.Component}, false)
+		b = Brief{Key: key, Kind: string(f.Kind), Category: f.Category, Severity: f.SeverityStr, Quality: f.Quality,
+			Status: h.Status, Rule: h.Rule.Key, RuleName: h.Rule.Name, File: f.File, Line: f.Line, Message: h.Message,
+			Flows: flowSteps(h.Flows, []sonarcli.Component{h.Component}), Verdicts: []string{"fix (then mark fixed)", "safe", "acknowledged"}}
+		if h.Resolution != "" {
+			b.Status += "/" + h.Resolution
+		}
+		component, tr = h.Component.Key, h.TextRange
+		rule, _ = r.ShowRule(ctx, h.Rule.Key)
+		b.Why, b.Assess, b.HowToFix = ruleSections(rule, "")
+		if b.Why == "" {
+			b.Why = clipSection(sonarcli.HTMLToText(h.Rule.RiskDescription + "\n\n" + h.Rule.VulnerabilityDescription))
+		}
+		if b.HowToFix == "" {
+			b.HowToFix = clipSection(sonarcli.HTMLToText(h.Rule.FixRecommendations))
+		}
+	}
+	if rule != nil {
+		b.RuleName, b.Language = rule.Name, rule.LangName
+	}
+	start, end := b.Line, b.Line
+	if tr != nil {
+		start, end = tr.StartLine, tr.EndLine
+		b.EndLine = tr.EndLine
+	}
+	if start > 0 {
+		from := max(1, start-contextLines)
+		lines, err := r.SourceLines(ctx, component, from, end+contextLines, branch, pr)
+		if err != nil {
+			b.ContextNote = "code context unavailable: " + err.Error()
+		}
+		for _, l := range lines {
+			b.Code = append(b.Code, CodeLine{Line: l.Line, Focus: l.Line >= start && l.Line <= end, Code: sonarcli.PlainText(l.Code)})
+		}
+	}
+	b.NextStep = "Present this finding to the user with your recommended verdict and reasoning, then STOP and ask for explicit approval. Only after approval: fix the code, or run `sqa mark`/`sqa hotspot` with --approved-by-user and the user's reasoning as --comment."
+	return b, nil
+}
+
 func (a *app) showCmd() *cobra.Command {
 	var branch, pr string
 	var contextLines int
@@ -149,8 +221,6 @@ func (a *app) showCmd() *cobra.Command {
 		Short: "Agent-ready brief for one issue or hotspot: rule, rationale, code context, fix guidance",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := cmd.Context()
-			key := args[0]
 			if contextLines < 0 || contextLines > 50 {
 				return usageErr("--context must be between 0 and 50")
 			}
@@ -158,75 +228,15 @@ func (a *app) showCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			var b Brief
-			var component string
-			var tr *sonarcli.TextRange
-			var rule *sonarcli.Rule
-
-			issue, comps, err := r.GetIssue(ctx, key)
+			b, err := loadBrief(cmd.Context(), r, args[0], contextLines, branch, pr)
 			if err != nil {
 				return err
 			}
-			if issue != nil {
-				f := findings.FromIssue(*issue, comps, false)
-				b = Brief{Key: key, Kind: string(f.Kind), Category: f.Category, Severity: f.SeverityStr, Quality: f.Quality,
-					Status: f.Status, Rule: issue.Rule, File: f.File, Line: f.Line, Message: issue.Message,
-					Flows: flowSteps(issue.Flows, comps), Verdicts: []string{"fix", "fp", "accept"}}
-				component, tr = issue.Component, issue.TextRange
-				rule, _ = r.ShowRule(ctx, issue.Rule)
-				b.Why, b.Assess, b.HowToFix = ruleSections(rule, issue.RuleDescriptionCtx)
-			} else {
-				h, err := r.ShowHotspot(ctx, key)
-				if err != nil {
-					var se *sonarcli.Error
-					if errors.As(err, &se) && strings.Contains(se.Stderr, "404") {
-						return usageErr("no issue or hotspot with key %q", key)
-					}
-					return err
-				}
-				f := findings.FromHotspot(sonarcli.Hotspot{Key: h.Key, Component: h.Component.Key, RuleKey: h.Rule.Key,
-					VulnerabilityProbability: h.Rule.VulnerabilityProbability, Status: h.Status, Line: h.Line, Message: h.Message, TextRange: h.TextRange},
-					[]sonarcli.Component{h.Component}, false)
-				b = Brief{Key: key, Kind: string(f.Kind), Category: f.Category, Severity: f.SeverityStr, Quality: f.Quality,
-					Status: h.Status, Rule: h.Rule.Key, RuleName: h.Rule.Name, File: f.File, Line: f.Line, Message: h.Message,
-					Flows: flowSteps(h.Flows, []sonarcli.Component{h.Component}), Verdicts: []string{"fix (then mark fixed)", "safe", "acknowledged"}}
-				if h.Resolution != "" {
-					b.Status += "/" + h.Resolution
-				}
-				component, tr = h.Component.Key, h.TextRange
-				rule, _ = r.ShowRule(ctx, h.Rule.Key)
-				b.Why, b.Assess, b.HowToFix = ruleSections(rule, "")
-				if b.Why == "" {
-					b.Why = clipSection(sonarcli.HTMLToText(h.Rule.RiskDescription + "\n\n" + h.Rule.VulnerabilityDescription))
-				}
-				if b.HowToFix == "" {
-					b.HowToFix = clipSection(sonarcli.HTMLToText(h.Rule.FixRecommendations))
-				}
-			}
-			if rule != nil {
-				b.RuleName, b.Language = rule.Name, rule.LangName
-			}
-			start, end := b.Line, b.Line
-			if tr != nil {
-				start, end = tr.StartLine, tr.EndLine
-				b.EndLine = tr.EndLine
-			}
-			if start > 0 {
-				from := max(1, start-contextLines)
-				lines, err := r.SourceLines(ctx, component, from, end+contextLines, branch, pr)
-				if err != nil {
-					b.ContextNote = "code context unavailable: " + err.Error()
-				}
-				for _, l := range lines {
-					b.Code = append(b.Code, CodeLine{Line: l.Line, Focus: l.Line >= start && l.Line <= end, Code: sonarcli.PlainText(l.Code)})
-				}
-			}
-			b.NextStep = "Present this finding to the user with your recommended verdict and reasoning, then STOP and ask for explicit approval. Only after approval: fix the code, or run `sqa mark`/`sqa hotspot` with --approved-by-user and the user's reasoning as --comment."
 			return a.out(b)
 		},
 	}
 	cmd.Flags().StringVar(&branch, "branch", "", "branch (for code context)")
 	cmd.Flags().StringVar(&pr, "pr", "", "pull request id (for code context)")
-	cmd.Flags().IntVar(&contextLines, "context", 5, "lines of code context around the finding")
+	cmd.Flags().IntVar(&contextLines, "context", defaultContextLines, "lines of code context around the finding")
 	return cmd
 }
