@@ -51,6 +51,9 @@ type Brief struct {
 	NextStep    string     `json:"next_step"`
 	ContextNote string     `json:"context_note,omitempty"`
 	URL         string     `json:"url,omitempty"`
+	PR          string     `json:"pr,omitempty"`
+	PRCheck     string     `json:"pr_check,omitempty"`
+	PRNote      string     `json:"pr_note,omitempty"`
 }
 
 // Markdown renders the brief.
@@ -60,6 +63,12 @@ func (b Brief) Markdown() string {
 	fmt.Fprintf(&s, "- **Key:** `%s` (%s, status %s)\n- **Rule:** %s\n- **Where:** `%s:%d`\n- **Message:** %s\n", b.Key, b.Kind, b.Status, b.RuleName, b.File, b.Line, b.Message)
 	if b.URL != "" {
 		fmt.Fprintf(&s, "- **URL:** %s\n", b.URL)
+	}
+	if b.PR != "" {
+		fmt.Fprintf(&s, "- **Open fix PR:** %s (do not open another)\n", b.PR)
+	}
+	if b.PRNote != "" {
+		fmt.Fprintf(&s, "- **Note:** %s\n", b.PRNote)
 	}
 	s.WriteString("\n")
 	if len(b.Code) > 0 {
@@ -257,6 +266,7 @@ func loadBrief(ctx context.Context, r *sonarcli.Runner, key string, contextLines
 func (a *app) showCmd() *cobra.Command {
 	var branch, pr string
 	var contextLines int
+	var noPRCheck bool
 	cmd := &cobra.Command{
 		Use:   "show <key>",
 		Short: "Agent-ready brief for one issue or hotspot: rule, rationale, code context, fix guidance",
@@ -273,11 +283,17 @@ func (a *app) showCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			ix, check := prIndex(cmd.Context(), noPRCheck)
+			b.PRCheck, b.PRNote = check, ix.Note
+			if p, ok := ix.Lookup(b.Key); ok {
+				b.PR = p.Ref()
+			}
 			return a.out(b)
 		},
 	}
 	cmd.Flags().StringVar(&branch, "branch", "", "branch (for code context)")
 	cmd.Flags().StringVar(&pr, "pr", "", "pull request id (for code context)")
 	cmd.Flags().IntVar(&contextLines, "context", defaultContextLines, "lines of code context around the finding")
+	cmd.Flags().BoolVar(&noPRCheck, "no-pr-check", false, "do not look for an open fix PR on the forge (gh / git ls-remote)")
 	return cmd
 }

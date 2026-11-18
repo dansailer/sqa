@@ -66,7 +66,37 @@ func newEnv(t *testing.T) *env {
 	t.Setenv("FAKE_SONAR_DIR", fixture)
 	log := filepath.Join(t.TempDir(), "calls.log")
 	t.Setenv("FAKE_SONAR_LOG", log)
+	// Fake gh and git first on PATH so the open-PR check never reaches a real
+	// forge. Both fail unless a test sets FAKE_GH_JSON / FAKE_GIT_HEADS.
+	forgeBin, err := filepath.Abs("../../testdata/forge")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", forgeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("FAKE_GH_JSON", "")
+	t.Setenv("FAKE_GIT_HEADS", "")
+	t.Setenv("FAKE_FORGE_LOG", filepath.Join(t.TempDir(), "forge.log"))
 	return &env{t: t, home: home, fixture: fixture, log: log}
+}
+
+func (e *env) forgeCalls() []string {
+	b, err := os.ReadFile(os.Getenv("FAKE_FORGE_LOG"))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return strings.Split(strings.TrimSpace(string(b)), "\n")
+}
+
+func forgeFixture(t *testing.T, name string) string {
+	t.Helper()
+	p, err := filepath.Abs(filepath.Join("../../testdata/forge", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
 }
 
 func (e *env) run(args ...string) (int, string, string) {
@@ -181,7 +211,7 @@ func TestFindingsDefaultFormatIsTOONWhenPiped(t *testing.T) {
 	if code != 0 {
 		t.Fatal(code)
 	}
-	if !strings.Contains(out, "findings[2]{rank,key,kind,tier,category,quality,severity,rule,file,line,new_code,status,message}:") {
+	if !strings.Contains(out, "findings[2]{rank,key,kind,tier,category,quality,severity,rule,file,line,new_code,status,message,pr}:") {
 		t.Fatalf("not TOON:\n%s", out)
 	}
 	if !strings.Contains(out, "shown: 2") || !strings.Contains(out, "total: 6") {
@@ -533,7 +563,7 @@ func TestSkillInstallAndPrint(t *testing.T) {
 	if !strings.HasPrefix(string(b), "---\nname: sqa\ndescription: ") {
 		t.Fatalf("frontmatter: %.80s", b)
 	}
-	for _, must := range []string{"No MCP", "sonar integrate", "sonar api", "--approved-by-user", "Stop and ask the user explicitly", "Never mark a finding as false positive or accepted to reduce the count", "Conventional Commits", "sonar.tests", "SonarQube URL", "`sonar` label", "not the raw finding key", "already-open PR", "in:body"} {
+	for _, must := range []string{"No MCP", "sonar integrate", "sonar api", "--approved-by-user", "Stop and ask the user explicitly", "Never mark a finding as false positive or accepted to reduce the count", "Conventional Commits", "sonar.tests", "SonarQube URL", "`sonar` label", "not the raw finding key", "already-open PR", "in:body", "sqa next --skip <key>", "pr_check"} {
 		if !strings.Contains(string(b), must) {
 			t.Errorf("SKILL.md missing %q", must)
 		}
@@ -925,5 +955,203 @@ func TestTelemetryShownAndPassed(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("sonar saw DO_NOT_TRACK %q? log:\n%s", want, got)
 		}
+	}
+}
+
+func runNext(t *testing.T, e *env, args ...string) NextResult {
+	t.Helper()
+	code, out, stderr := e.run(append([]string{"next", "--format", "json"}, args...)...)
+	if code != 0 {
+		t.Fatalf("exit %d %s", code, stderr)
+	}
+	var n NextResult
+	if err := json.Unmarshal([]byte(out), &n); err != nil {
+		t.Fatal(err, out)
+	}
+	return n
+}
+
+func TestFindingsPRColumn(t *testing.T) {
+	e := newEnv(t)
+	t.Setenv("FAKE_GH_JSON", forgeFixture(t, "prs.json"))
+	code, out, stderr := e.run("findings", "--format", "json")
+	if code != 0 {
+		t.Fatalf("exit %d %s", code, stderr)
+	}
+	var res FindingsResult
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatal(err, out)
+	}
+	prs := map[string]string{}
+	for _, f := range res.Findings {
+		prs[f.Key] = f.PR
+	}
+	want := map[string]string{
+		"AX-VULN":     "https://github.com/acme/demo/pull/12", // key in the PR body
+		"HS-1":        "https://github.com/acme/demo/pull/15", // key in the head branch
+		"AX-VULN-OLD": "", "HS-2": "", "AX-BUG": "", "AX-SMELL": "",
+	}
+	for k, v := range want {
+		if prs[k] != v {
+			t.Errorf("%s: pr = %q, want %q", k, prs[k], v)
+		}
+	}
+	if res.PRCheck != "gh" || res.Note != "" {
+		t.Errorf("pr_check=%q note=%q", res.PRCheck, res.Note)
+	}
+	if c := e.forgeCalls(); len(c) != 1 || !strings.HasPrefix(c[0], "gh pr list --state open") {
+		t.Errorf("want one gh call per run, got %v", c)
+	}
+
+	code, out, _ = e.run("findings", "--format", "table")
+	if code != 0 || !strings.Contains(out, " PR ") || !strings.Contains(out, "#12") || !strings.Contains(out, "#15") {
+		t.Errorf("table:\n%s", out)
+	}
+	code, out, _ = e.run("findings", "--format", "md")
+	if code != 0 || !strings.Contains(out, "| new | PR | message |") || !strings.Contains(out, "pull/12") {
+		t.Errorf("md:\n%s", out)
+	}
+	code, out, _ = e.run("findings", "--format", "toon")
+	if code != 0 || !strings.Contains(out, "pr}:") || !strings.Contains(out, "pull/12") {
+		t.Errorf("toon must stay tabular with a pr field:\n%s", out)
+	}
+}
+
+func TestFindingsPRCheckUnavailableAndOff(t *testing.T) {
+	e := newEnv(t)
+	code, out, stderr := e.run("findings", "--format", "json")
+	if code != 0 {
+		t.Fatalf("exit %d %s", code, stderr)
+	}
+	var res FindingsResult
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatal(err)
+	}
+	if res.PRCheck != "unavailable" || !strings.Contains(res.Note, "gh auth login") || !strings.Contains(res.Note, "not a git repository") {
+		t.Errorf("pr_check=%q note=%q", res.PRCheck, res.Note)
+	}
+	for _, f := range res.Findings {
+		if f.PR != "" {
+			t.Errorf("%s: unexpected pr %q", f.Key, f.PR)
+		}
+	}
+	if len(res.Findings) != 6 {
+		t.Errorf("findings must still be listed: %d", len(res.Findings))
+	}
+
+	t.Setenv("FAKE_FORGE_LOG", filepath.Join(t.TempDir(), "off.log"))
+	t.Setenv("FAKE_GH_JSON", forgeFixture(t, "prs.json"))
+	code, out, _ = e.run("findings", "--format", "json", "--no-pr-check")
+	if code != 0 {
+		t.Fatal(out)
+	}
+	res = FindingsResult{}
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatal(err)
+	}
+	if res.PRCheck != "off" || res.Findings[0].PR != "" || e.forgeCalls() != nil {
+		t.Errorf("--no-pr-check: pr_check=%q pr=%q calls=%v", res.PRCheck, res.Findings[0].PR, e.forgeCalls())
+	}
+}
+
+func TestNextSkipsFindingsWithOpenPR(t *testing.T) {
+	e := newEnv(t)
+	t.Setenv("FAKE_GH_JSON", forgeFixture(t, "prs.json"))
+	n := runNext(t, e)
+	if n.Finding == nil || n.Finding.Key != "AX-VULN-OLD" || n.Finding.Rank != 2 || n.Finding.PR != "" {
+		t.Fatalf("next = %+v", n.Finding)
+	}
+	if n.Total != 6 || n.Remaining != 4 || n.PRCheck != "gh" {
+		t.Errorf("total=%d remaining=%d pr_check=%q", n.Total, n.Remaining, n.PRCheck)
+	}
+	if len(n.Skipped) != 2 || n.Skipped[0].Key != "AX-VULN" || n.Skipped[0].Reason != "open PR" || !strings.HasSuffix(n.Skipped[0].PR, "/pull/12") ||
+		n.Skipped[1].Key != "HS-1" {
+		t.Errorf("skipped: %+v", n.Skipped)
+	}
+	if n.Brief == nil || n.Brief.Key != "AX-VULN-OLD" {
+		t.Errorf("brief: %+v", n.Brief)
+	}
+	if c := e.forgeCalls(); len(c) != 1 {
+		t.Errorf("want one forge call, got %v", c)
+	}
+
+	code, out, _ := e.run("next", "--format", "table")
+	if code != 0 || !strings.Contains(out, "Skipped 2: AX-VULN (open PR https://github.com/acme/demo/pull/12)") || !strings.Contains(out, "[2 of 6] demo") {
+		t.Errorf("table:\n%s", out)
+	}
+
+	n = runNext(t, e, "--include-open-pr")
+	if n.Finding == nil || n.Finding.Key != "AX-VULN" || !strings.HasSuffix(n.Finding.PR, "/pull/12") || len(n.Skipped) != 0 {
+		t.Fatalf("--include-open-pr: %+v skipped=%+v", n.Finding, n.Skipped)
+	}
+	if n.Brief == nil || !strings.HasSuffix(n.Brief.PR, "/pull/12") || !strings.Contains(n.Hint, "already has an open fix PR") {
+		t.Errorf("brief pr=%v hint=%q", n.Brief, n.Hint)
+	}
+}
+
+func TestNextManualSkip(t *testing.T) {
+	e := newEnv(t)
+	n := runNext(t, e, "--skip", "AX-VULN", "--skip", "AX-VULN-OLD,HS-2")
+	if n.Finding == nil || n.Finding.Key != "HS-1" {
+		t.Fatalf("next = %+v", n.Finding)
+	}
+	var keys []string
+	for _, sk := range n.Skipped {
+		if sk.Reason != "--skip" {
+			t.Errorf("reason: %+v", sk)
+		}
+		keys = append(keys, sk.Key)
+	}
+	if strings.Join(keys, " ") != "AX-VULN AX-VULN-OLD HS-2" || n.Remaining != 3 {
+		t.Errorf("skipped=%v remaining=%d", keys, n.Remaining)
+	}
+	if n.PRCheck != "unavailable" || !strings.Contains(n.Note, "open-PR check unavailable") {
+		t.Errorf("degraded check must be reported: %q %q", n.PRCheck, n.Note)
+	}
+
+	n = runNext(t, e, "--skip", "AX-VULN,AX-VULN-OLD,HS-1,HS-2,AX-BUG,AX-SMELL")
+	if n.Finding != nil || n.Remaining != 0 || len(n.Skipped) != 6 {
+		t.Fatalf("all skipped: %+v", n)
+	}
+	code, out, _ := e.run("next", "--format", "table", "--skip", "AX-VULN,AX-VULN-OLD,HS-1,HS-2,AX-BUG,AX-SMELL")
+	if code != 0 || !strings.Contains(out, "No other open findings in demo.") {
+		t.Errorf("table:\n%s", out)
+	}
+}
+
+func TestNextGitBranchFallback(t *testing.T) {
+	e := newEnv(t)
+	t.Setenv("FAKE_GIT_HEADS", forgeFixture(t, "heads.txt"))
+	n := runNext(t, e)
+	if n.Finding == nil || n.Finding.Key != "AX-VULN-OLD" {
+		t.Fatalf("next = %+v", n.Finding)
+	}
+	if len(n.Skipped) != 1 || n.Skipped[0].PR != "branch:sonar/go-s3649-ax-vuln" || n.PRCheck != "git" ||
+		!strings.Contains(n.Note, "remote sonar/* branches") {
+		t.Errorf("skipped=%+v check=%q note=%q", n.Skipped, n.PRCheck, n.Note)
+	}
+	c := e.forgeCalls()
+	if len(c) != 2 || !strings.HasPrefix(c[0], "gh pr list") || c[1] != "git ls-remote --heads origin refs/heads/sonar/*" {
+		t.Errorf("calls: %v", c)
+	}
+}
+
+func TestShowReportsOpenPR(t *testing.T) {
+	e := newEnv(t)
+	t.Setenv("FAKE_GH_JSON", forgeFixture(t, "prs.json"))
+	code, out, stderr := e.run("show", "AX-VULN", "--format", "json")
+	if code != 0 {
+		t.Fatalf("exit %d %s", code, stderr)
+	}
+	var b Brief
+	if err := json.Unmarshal([]byte(out), &b); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(b.PR, "/pull/12") || b.PRCheck != "gh" {
+		t.Errorf("pr=%q check=%q", b.PR, b.PRCheck)
+	}
+	code, out, _ = e.run("show", "AX-VULN", "--format", "md")
+	if code != 0 || !strings.Contains(out, "**Open fix PR:** https://github.com/acme/demo/pull/12") {
+		t.Errorf("md:\n%s", out)
 	}
 }

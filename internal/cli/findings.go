@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/dansailer/sqa/internal/findings"
+	"github.com/dansailer/sqa/internal/forge"
 	"github.com/dansailer/sqa/internal/output"
 	"github.com/dansailer/sqa/internal/sonarcli"
 )
@@ -18,6 +19,7 @@ type scopeFlags struct {
 	newCode                   bool
 	minSeverity               string
 	securityOnly              bool
+	noPRCheck                 bool
 }
 
 func (s *scopeFlags) register(cmd *cobra.Command) {
@@ -29,16 +31,21 @@ func (s *scopeFlags) register(cmd *cobra.Command) {
 	f.BoolVar(&s.newCode, "new-code", false, "only findings on new code")
 	f.StringVar(&s.minSeverity, "min-severity", "", "minimum severity: BLOCKER, HIGH|CRITICAL, MEDIUM|MAJOR, LOW|MINOR, INFO")
 	f.BoolVar(&s.securityOnly, "security-only", false, "only vulnerabilities and security hotspots")
+	f.BoolVar(&s.noPRCheck, "no-pr-check", false, "do not look for open fix PRs on the forge (gh / git ls-remote)")
 }
 
 // FindingsResult is the output of `sqa findings`.
 type FindingsResult struct {
-	Project     string             `json:"project"`
-	Branch      string             `json:"branch,omitempty"`
-	PullRequest string             `json:"pull_request,omitempty"`
-	Total       int                `json:"total"`
-	Shown       int                `json:"shown"`
-	Findings    []findings.Finding `json:"findings"`
+	Project     string `json:"project"`
+	Branch      string `json:"branch,omitempty"`
+	PullRequest string `json:"pull_request,omitempty"`
+	Total       int    `json:"total"`
+	Shown       int    `json:"shown"`
+	// PRCheck says how open fix PRs were looked up: gh, git (remote
+	// branches only), off (--no-pr-check), unavailable, or none (nothing to check).
+	PRCheck  string             `json:"pr_check"`
+	Note     string             `json:"note,omitempty"`
+	Findings []findings.Finding `json:"findings"`
 }
 
 // Markdown renders a markdown table.
@@ -46,14 +53,17 @@ func (r FindingsResult) Markdown() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "## SonarQube findings: %s%s\n\n", r.Project, scopeSuffix(r.Branch, r.PullRequest))
 	fmt.Fprintf(&b, "Showing %d of %d, ranked security first.\n\n", r.Shown, r.Total)
+	if r.Note != "" {
+		fmt.Fprintf(&b, "Note: %s\n\n", r.Note)
+	}
 	if len(r.Findings) == 0 {
 		b.WriteString("No open findings.\n")
 		return b.String()
 	}
-	b.WriteString("| # | category | severity | key | rule | location | new | message |\n|---|---|---|---|---|---|---|---|\n")
+	b.WriteString("| # | category | severity | key | rule | location | new | PR | message |\n|---|---|---|---|---|---|---|---|---|\n")
 	for _, f := range r.Findings {
-		fmt.Fprintf(&b, "| %d | %s | %s | %s | %s | %s | %s | %s |\n", f.Rank, f.Category, f.SeverityStr, f.Key, f.Rule,
-			output.MDEscape(loc(f)), yesNo(f.NewCode), output.MDEscape(f.Message))
+		fmt.Fprintf(&b, "| %d | %s | %s | %s | %s | %s | %s | %s | %s |\n", f.Rank, f.Category, f.SeverityStr, f.Key, f.Rule,
+			output.MDEscape(loc(f)), yesNo(f.NewCode), output.MDEscape(f.PR), output.MDEscape(f.Message))
 	}
 	return b.String()
 }
@@ -62,14 +72,48 @@ func (r FindingsResult) Markdown() string {
 func (r FindingsResult) Table() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s%s: %d of %d findings (security first)\n", r.Project, scopeSuffix(r.Branch, r.PullRequest), r.Shown, r.Total)
+	if r.Note != "" {
+		fmt.Fprintf(&b, "note: %s\n", r.Note)
+	}
 	if len(r.Findings) == 0 {
 		return b.String()
 	}
-	fmt.Fprintf(&b, "%-4s %-15s %-8s %-3s %-22s %-40s %s\n", "#", "CATEGORY", "SEVERITY", "NEW", "KEY", "LOCATION", "MESSAGE")
+	fmt.Fprintf(&b, "%-4s %-15s %-8s %-3s %-22s %-40s %-8s %s\n", "#", "CATEGORY", "SEVERITY", "NEW", "KEY", "LOCATION", "PR", "MESSAGE")
 	for _, f := range r.Findings {
-		fmt.Fprintf(&b, "%-4d %-15s %-8s %-3s %-22s %-40s %s\n", f.Rank, f.Category, f.SeverityStr, yesNo(f.NewCode), f.Key, clip(loc(f), 40), clip(f.Message, 90))
+		fmt.Fprintf(&b, "%-4d %-15s %-8s %-3s %-22s %-40s %-8s %s\n", f.Rank, f.Category, f.SeverityStr, yesNo(f.NewCode), f.Key, clip(loc(f), 40),
+			shortPR(f.PR), clip(f.Message, 90))
 	}
 	return b.String()
+}
+
+// shortPR renders a PR reference for the terminal table: `#12` for a
+// GitHub-style URL, `branch` for a remote fix branch, else the reference.
+func shortPR(ref string) string {
+	if ref == "" {
+		return "-"
+	}
+	if strings.HasPrefix(ref, "branch:") {
+		return "branch"
+	}
+	if i := strings.LastIndex(ref, "/pull/"); i >= 0 {
+		return "#" + ref[i+len("/pull/"):]
+	}
+	if i := strings.LastIndex(ref, "/merge_requests/"); i >= 0 {
+		return "!" + ref[i+len("/merge_requests/"):]
+	}
+	return clip(ref, 8)
+}
+
+// prIndex looks up open fix PRs once per invocation, unless disabled.
+func prIndex(ctx context.Context, off bool) (forge.Index, string) {
+	if off {
+		return forge.Index{}, "off"
+	}
+	ix := forge.Detect(ctx, "")
+	if !ix.Available() {
+		return ix, "unavailable"
+	}
+	return ix, ix.Source
 }
 
 func scopeSuffix(branch, pr string) string {
@@ -189,6 +233,17 @@ func (a *app) gather(ctx context.Context, r *sonarcli.Runner, s scopeFlags) (Fin
 	if all == nil {
 		all = []findings.Finding{}
 	}
+	if len(all) > 0 || s.noPRCheck {
+		ix, check := prIndex(ctx, s.noPRCheck)
+		res.PRCheck, res.Note = check, ix.Note
+		for i := range all {
+			if p, ok := ix.Lookup(all[i].Key); ok {
+				all[i].PR = p.Ref()
+			}
+		}
+	} else {
+		res.PRCheck = "none"
+	}
 	res.Findings = all
 	res.Total = len(all)
 	res.Shown = len(all)
@@ -248,10 +303,22 @@ then by severity, new code first, file and line.`,
 	return cmd
 }
 
+// Skipped is a finding `sqa next` passed over.
+type Skipped struct {
+	Rank   int    `json:"rank"`
+	Key    string `json:"key"`
+	Reason string `json:"reason"` // "open PR" or "--skip"
+	PR     string `json:"pr"`
+}
+
 // NextResult is the output of `sqa next`.
 type NextResult struct {
 	Project   string            `json:"project"`
+	Total     int               `json:"total"`
 	Remaining int               `json:"remaining"`
+	PRCheck   string            `json:"pr_check"`
+	Note      string            `json:"note,omitempty"`
+	Skipped   []Skipped         `json:"skipped"`
 	Finding   *findings.Finding `json:"finding"`
 	Brief     *Brief            `json:"brief,omitempty"`
 	Hint      string            `json:"hint"`
@@ -262,22 +329,80 @@ func (n NextResult) Markdown() string { return n.Table() }
 
 // Table renders a rank header, then the same brief as `sqa show`.
 func (n NextResult) Table() string {
+	var b strings.Builder
+	if len(n.Skipped) > 0 {
+		var parts []string
+		for _, sk := range n.Skipped {
+			p := sk.Key + " (" + sk.Reason
+			if sk.PR != "" {
+				p += " " + sk.PR
+			}
+			parts = append(parts, p+")")
+		}
+		fmt.Fprintf(&b, "Skipped %d: %s\n", len(n.Skipped), strings.Join(parts, ", "))
+	}
+	if n.Note != "" {
+		fmt.Fprintf(&b, "Note: %s\n", n.Note)
+	}
+	if b.Len() > 0 {
+		b.WriteString("\n")
+	}
 	if n.Finding == nil {
-		return "No open findings in " + n.Project + "."
+		if len(n.Skipped) > 0 {
+			return b.String() + "No other open findings in " + n.Project + "."
+		}
+		return b.String() + "No open findings in " + n.Project + "."
 	}
-	header := fmt.Sprintf("[%d of %d] %s  (new code: %s)", n.Finding.Rank, n.Remaining, n.Project, yesNo(n.Finding.NewCode))
-	if n.Brief == nil {
-		return header
+	fmt.Fprintf(&b, "[%d of %d] %s  (new code: %s, %d remaining)", n.Finding.Rank, n.Total, n.Project, yesNo(n.Finding.NewCode), n.Remaining)
+	if n.Brief != nil {
+		b.WriteString("\n\n" + n.Brief.Markdown())
 	}
-	return header + "\n\n" + n.Brief.Markdown()
+	return b.String()
+}
+
+// pickNext returns the first finding that is neither in skip nor (unless
+// includeOpenPR) has an open PR, and the findings passed over before it.
+func pickNext(fs []findings.Finding, skip map[string]bool, includeOpenPR bool) (*findings.Finding, []Skipped, int) {
+	var skipped []Skipped
+	var next *findings.Finding
+	remaining := 0
+	for i := range fs {
+		f := fs[i]
+		switch {
+		case skip[f.Key]:
+			skipped = append(skipped, Skipped{Rank: f.Rank, Key: f.Key, Reason: "--skip", PR: f.PR})
+			continue
+		case f.PR != "" && !includeOpenPR:
+			skipped = append(skipped, Skipped{Rank: f.Rank, Key: f.Key, Reason: "open PR", PR: f.PR})
+			continue
+		}
+		remaining++
+		if next == nil {
+			next = &f
+		}
+	}
+	if skipped == nil {
+		skipped = []Skipped{}
+	}
+	return next, skipped, remaining
 }
 
 func (a *app) nextCmd() *cobra.Command {
 	var s scopeFlags
+	var skip []string
+	var includeOpenPR bool
 	cmd := &cobra.Command{
 		Use:   "next",
-		Short: "Show the highest-priority open finding, with the full brief",
-		Args:  cobra.NoArgs,
+		Short: "Show the highest-priority open finding without an open fix PR, with the full brief",
+		Long: `Shows the highest-ranked finding with the full brief (same as sqa show).
+
+Findings that already have an open fix PR are skipped. sqa looks them up once
+per run with 'gh pr list' (a PR whose body contains the finding key or whose
+head branch contains it, e.g. sonar/<rule>-<key>); without gh it falls back to
+'git ls-remote --heads origin sonar/*'. If neither works, nothing is skipped
+and a note says so. --include-open-pr turns skipping off, --no-pr-check turns
+the lookup off, --skip <key> passes over a finding by hand (repeatable).`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			r, err := a.runner()
 			if err != nil {
@@ -288,20 +413,32 @@ func (a *app) nextCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			n := NextResult{Project: res.Project, Remaining: res.Total}
-			if len(res.Findings) > 0 {
-				f := res.Findings[0]
-				n.Finding = &f
+			skipSet := map[string]bool{}
+			for _, k := range skip {
+				if k = strings.TrimSpace(k); k != "" {
+					skipSet[k] = true
+				}
+			}
+			f, skipped, remaining := pickNext(res.Findings, skipSet, includeOpenPR)
+			n := NextResult{Project: res.Project, Total: res.Total, Remaining: remaining, PRCheck: res.PRCheck, Note: res.Note, Skipped: skipped}
+			if f != nil {
+				n.Finding = f
 				b, err := loadBrief(ctx, r, f.Key, defaultContextLines, s.branch, s.pr)
 				if err != nil {
 					return err
 				}
+				b.PR = f.PR
 				n.Brief = &b
 				n.Hint = "Present this finding with a recommended verdict and ask the user before acting."
+				if f.PR != "" {
+					n.Hint = "This finding already has an open fix PR (" + f.PR + "): tell the user and do not open another; ask how to proceed."
+				}
 			}
 			return a.out(n)
 		},
 	}
 	s.register(cmd)
+	cmd.Flags().StringSliceVar(&skip, "skip", nil, "finding key to pass over (repeatable or comma-separated)")
+	cmd.Flags().BoolVar(&includeOpenPR, "include-open-pr", false, "do not skip findings that already have an open fix PR")
 	return cmd
 }

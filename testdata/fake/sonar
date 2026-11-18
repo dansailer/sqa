@@ -59,6 +59,7 @@ case "$1" in
           *hotspot=HS-1*) cat "$d/hotspot_show.json" ;;
           *) echo "SonarQube API error: 404 - {\"errors\":[{\"msg\":\"Hotspot not found\"}]}" >&2; exit 1 ;;
         esac ;;
+      /api/issues/search*issues=AX-VULN-OLD*) sed 's/"AX-VULN"/"AX-VULN-OLD"/' "$d/issue_vuln.json" ;;
       /api/issues/search*issues=AX-VULN*) cat "$d/issue_vuln.json" ;;
       /api/issues/search*) echo '{"total":0,"p":1,"ps":100,"paging":{"pageIndex":1,"pageSize":100,"total":0},"issues":[],"components":[]}' ;;
       /api/rules/show*) cat "$d/rule_show.json" ;;

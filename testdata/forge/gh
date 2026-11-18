@@ -1,0 +1,10 @@
+#!/bin/sh
+# Fake `gh` for sqa tests. Prints $FAKE_GH_JSON (a file) for `gh pr list`,
+# fails when it is unset. Logs each call to $FAKE_FORGE_LOG.
+[ -n "${FAKE_FORGE_LOG:-}" ] && echo "gh $*" >>"$FAKE_FORGE_LOG"
+if [ "$1 $2" = "pr list" ] && [ -n "${FAKE_GH_JSON:-}" ]; then
+  cat "$FAKE_GH_JSON"
+  exit 0
+fi
+echo "To get started with GitHub CLI, please run:  gh auth login" >&2
+exit 4

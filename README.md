@@ -158,9 +158,9 @@ uses your values. `sqa auth status` and `sqa doctor` show the token store and
 | `sqa setup [--force] [--sonar-version V]` | Optional. Extract and verify the bundled `sonar`, or download another official version (checksum-verified). |
 | `sqa doctor` | Check the token store (path, permissions), `sonar` home, the `sonar` install and version, authentication (`sonar auth status`) and server version (2025.1 or newer). |
 | `sqa auth login\|status\|logout` | Pass-through to `sonar auth …`. Run `login` yourself; agents must not. |
-| `sqa findings` | Open issues and to-review hotspots, ranked security first. Flags: `--project`, `--branch`, `--pr`, `--file`, `--new-code`, `--min-severity`, `--security-only`, `--limit` (default 50, 0 = all), `--fail-on`. |
-| `sqa next` | Highest-priority finding, with the same brief as `sqa show` (same filters). |
-| `sqa show <key> [--context N] [--branch B\|--pr N]` | Agent-ready brief for an issue or hotspot. |
+| `sqa findings` | Open issues and to-review hotspots, ranked security first, with a `PR` column for findings that already have an open fix PR. Flags: `--project`, `--branch`, `--pr`, `--file`, `--new-code`, `--min-severity`, `--security-only`, `--limit` (default 50, 0 = all), `--fail-on`, `--no-pr-check`. |
+| `sqa next` | Highest-priority finding **without an open fix PR**, with the same brief as `sqa show` (same filters). `--skip <key>` (repeatable) passes over a finding; `--include-open-pr` stops skipping findings with an open PR. |
+| `sqa show <key> [--context N] [--branch B\|--pr N] [--no-pr-check]` | Agent-ready brief for an issue or hotspot, including any open fix PR. |
 | `sqa mark <issue-key> fp\|accept\|reopen --comment "…" --approved-by-user [--dry-run]` | Transition an issue and add a `[sqa]` comment. |
 | `sqa hotspot <key> safe\|fixed\|acknowledged --comment "…" --approved-by-user [--dry-run]` | Review a hotspot (status `REVIEWED`). |
 | `sqa skill print` | Print the embedded `SKILL.md`. |
@@ -181,6 +181,23 @@ token-efficient) when piped, which is what agents see.
 Within a tier: severity (BLOCKER > HIGH > MEDIUM > LOW > INFO; Standard
 Experience severities map CRITICAL→HIGH, MAJOR→MEDIUM, MINOR→LOW), then new code
 first, then file and line. `--min-severity` accepts either naming scheme.
+
+### Open fix PRs
+
+`findings`, `next` and `show` check once per run whether a finding already has
+an open fix PR, so an agent does not work on (or duplicate) a fix that is in
+review. They ask your forge, not SonarQube, and `sqa` never handles a token:
+
+1. `gh pr list --state open` (uses `gh`'s own login). A PR counts when its
+   body contains the finding key (the skill links the finding there) or its
+   head branch ends with the key, e.g. `sonar/go-s3649-azx1...`.
+2. Without `gh` (or with a non-GitHub remote):
+   `git ls-remote --heads origin 'sonar/*'`, matched by branch name. This
+   finds the branch, not the PR, so the PR column shows `branch`.
+3. If neither works, nothing is skipped and the output carries a `note`.
+
+`pr_check` in the output says which one was used (`gh`, `git`, `unavailable`,
+`off`). `--no-pr-check` skips the lookup, e.g. for `findings --fail-on` in CI.
 
 ### Exit codes
 

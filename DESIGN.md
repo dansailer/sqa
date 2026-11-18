@@ -134,10 +134,20 @@ Multiple servers: out of scope (one internal instance). `sonar` keeps one active
 | `sqa setup` | Optional: extract/verify the bundled `sonar`, or download another official version. |
 | `sqa auth login\|status\|logout` | Thin pass-through to `sonar auth …` (login must be run by the user in a terminal). |
 | `sqa doctor` | Check `sonar` installed and version matches (warn on mismatch), authenticated (`sonar auth status`, shows server and source), server ≥ 2025.1 (or Community Build ≥ 25.1). |
-| `sqa findings` | Unified, ranked list of open issues (`OPEN`, `CONFIRMED`) + `TO_REVIEW` hotspots. Flags: `--project`, `--branch`, `--pr`, `--file`, `--new-code`, `--min-severity`, `--security-only`, `--limit` (default 50, 0 = all), `--fail-on`, `--format`. |
-| `sqa next` | The highest-priority open finding, with the same brief as `sqa show` (for one-at-a-time loops). |
+| `sqa findings` | Unified, ranked list of open issues (`OPEN`, `CONFIRMED`) + `TO_REVIEW` hotspots, with a `pr` column (open fix PR, §6.1). Flags: `--project`, `--branch`, `--pr`, `--file`, `--new-code`, `--min-severity`, `--security-only`, `--limit` (default 50, 0 = all), `--fail-on`, `--no-pr-check`, `--format`. |
+| `sqa next` | The highest-priority open finding without an open fix PR, with the same brief as `sqa show` (for one-at-a-time loops). `--skip <key>` (repeatable, comma-separated) passes over findings by hand; `--include-open-pr` turns PR skipping off. Output lists `skipped` (rank, key, reason `open PR` or `--skip`, pr), `total`, `remaining`, `pr_check`, `note`. |
 | `sqa show <key>` | Agent-ready brief: rule, rationale (rule description sections `root_cause` / `assess_the_problem` / `how_to_fix`, or hotspot risk text), location, code context (`--context N`, default 5, HTML stripped), data-flow, possible verdicts, next step, and a URL to the finding on the server (from `sonar auth status`; the token is never read). Tries the key as an issue, then as a hotspot. |
 | `sqa version` | sqa version, pinned `sonar` version, whether it is bundled (version, SHA-256) and which `sonar` is in use. |
+
+### 6.1 Open fix PR lookup (`findings`, `next`, `show`)
+
+So an agent does not get stuck on (or duplicate) a finding that already has a fix in review, `sqa` asks the **forge**, never SonarQube, and never touches a token (`gh` uses its own login, `git` the repository's credentials). One listing call per invocation, not per finding, each with a 15 s timeout and prompts disabled (`GH_PROMPT_DISABLED=1`, `GIT_TERMINAL_PROMPT=0`):
+
+1. `gh pr list --state open --limit 200 --json number,url,headRefName,body` in the current directory. A finding has an open PR when its key appears as a whole token in a PR body (the skill puts the SonarQube URL there) or a PR head branch ends with the key after lowercasing and collapsing non-alphanumerics to `-` (the skill's `sonar/<rule>-<key>`). The label is not required, so PRs without the `sonar` label still count.
+2. If `gh` is missing, not logged in, or the remote is not GitHub: `git ls-remote --heads origin 'refs/heads/sonar/*'`, matched by branch name only. The reference is then `branch:<name>` and the note says a branch may have no open PR (works for GitLab and others).
+3. If both fail: nothing is skipped, `pr_check` is `unavailable` and `note` carries both errors. The command still succeeds.
+
+`pr_check` values: `gh`, `git`, `unavailable`, `off` (`--no-pr-check`), `none` (no findings, so no lookup). The `pr` field holds the PR URL (or `branch:<name>`), empty otherwise; the table shows `#12`, `!12` (GitLab MR) or `branch`.
 
 ### State-changing (require user approval — see §8)
 
@@ -199,7 +209,7 @@ Frontmatter: `name: sqa`, `description: …`. Content:
 - What `sqa` is; prerequisite: `sqa doctor` must pass; the user (not the agent) runs `sqa auth login`.
 - **Hard rules**: never use, install or configure a SonarQube MCP server; never run `sonar integrate` or `sonar api`; never run `sonar auth login` (the user does that); never set, read or print tokens; always ask the user before any triage decision.
 - Triage order (§7) and how to read `next` / `findings` / `show` output.
-- The fix loop: check for an already-open PR/MR on the finding (do not duplicate; ask the user how to proceed; `sqa` has no skip/defer) → one finding per branch/PR from the up-to-date default branch → fix and commit (Conventional Commits, include the rule key) → tests → open a PR (ask first; never merge; body links the finding by message and rule, not the raw key; apply the `sonar` label) → return to the default branch → (re-scan via CI or `sonar` analysis if available) → re-check with `sqa show <key>` / `sqa next`. Presentation: if the finding is in test code, accept or a Sonar exclusion may be appropriate; never edit Sonar settings without approval.
+- The fix loop: `sqa next` skips findings with an already-open PR/MR (forge lookup, see §6.1); if a finding still shows a `pr`, or the lookup was `unavailable`/`git`, check the forge, do not duplicate and ask the user how to proceed; `--skip <key>` only when the user wants to leave a finding for now → one finding per branch/PR from the up-to-date default branch → fix and commit (Conventional Commits, include the rule key) → tests → open a PR (ask first; never merge; body links the finding by message and rule, not the raw key; apply the `sonar` label) → return to the default branch → (re-scan via CI or `sonar` analysis if available) → re-check with `sqa show <key>` / `sqa next`. Presentation: if the finding is in test code, accept or a Sonar exclusion may be appropriate; never edit Sonar settings without approval.
 - How to present a recommendation and ask for approval (template), and that approval covers only the presented findings.
 - Never mark something FP/accepted just to reduce counts; justify every decision in the comment.
 

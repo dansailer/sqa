@@ -1,0 +1,2 @@
+abc123	refs/heads/sonar/go-s3649-ax-vuln
+def456	refs/heads/sonar/other-zz-9

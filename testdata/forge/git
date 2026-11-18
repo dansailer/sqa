@@ -1,0 +1,10 @@
+#!/bin/sh
+# Fake `git` for sqa tests. Prints $FAKE_GIT_HEADS (a file) for
+# `git ls-remote`, fails when it is unset. Logs each call to $FAKE_FORGE_LOG.
+[ -n "${FAKE_FORGE_LOG:-}" ] && echo "git $*" >>"$FAKE_FORGE_LOG"
+if [ "$1" = ls-remote ] && [ -n "${FAKE_GIT_HEADS:-}" ]; then
+  cat "$FAKE_GIT_HEADS"
+  exit 0
+fi
+echo "fatal: not a git repository (or any of the parent directories): .git" >&2
+exit 128

@@ -114,6 +114,9 @@ type Finding struct {
 	NewCode     bool     `json:"new_code"`
 	Status      string   `json:"status"`
 	Message     string   `json:"message"`
+	// PR is the open fix PR (URL) or `branch:<name>` (remote fix branch,
+	// git fallback); empty when none was found or the check was off.
+	PR string `json:"pr"`
 }
 
 // qualityTier orders MQR software qualities.

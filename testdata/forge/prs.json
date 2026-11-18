@@ -1,0 +1,5 @@
+[
+  {"number": 12, "url": "https://github.com/acme/demo/pull/12", "headRefName": "feature/unrelated", "body": "Fixes [SQL injection (go:S3649)](https://sonarqube.example.com/project/issues?id=demo&issues=AX-VULN&open=AX-VULN)"},
+  {"number": 15, "url": "https://github.com/acme/demo/pull/15", "headRefName": "sonar/go-s1192-hs-1", "body": "no link"},
+  {"number": 20, "url": "https://github.com/acme/demo/pull/20", "headRefName": "docs/readme", "body": "unrelated"}
+]

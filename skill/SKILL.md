@@ -48,9 +48,15 @@ Read-only, run freely:
 | --- | --- |
 | `sqa doctor` | Check that `sonar` is installed, authenticated and that the server is 2025.1+. |
 | `sqa auth status` | Show which SonarQube server `sonar` is connected to (never shows the token). |
-| `sqa findings [--project P] [--branch B \| --pr N] [--file F] [--new-code] [--min-severity S] [--security-only] [--limit N]` | Ranked overview. Use when the user asks for the list, or to present several at once. |
-| `sqa next [same filters]` | Highest-priority finding with the full brief (rule, why, location, code context, fix guidance). The default way to work one by one. |
-| `sqa show <key>` | Brief for a specific key (one from `findings`, or that the user names). |
+| `sqa findings [--project P] [--branch B \| --pr N] [--file F] [--new-code] [--min-severity S] [--security-only] [--limit N]` | Ranked overview. Use when the user asks for the list, or to present several at once. The `pr` column shows an open fix PR for a finding. |
+| `sqa next [same filters] [--skip KEY]… [--include-open-pr]` | Highest-priority finding **without an open fix PR**, with the full brief (rule, why, location, code context, fix guidance). The default way to work one by one. `skipped` lists what it passed over. |
+| `sqa show <key>` | Brief for a specific key (one from `findings`, or that the user names), including any open fix PR. |
+
+All three look up open fix PRs once per run through `gh` (or, without it,
+remote `sonar/*` branches via `git ls-remote`). `pr_check` says which was used;
+if it is `unavailable`, nothing was skipped and the `note` says why. Then
+check the forge yourself before opening a PR. `--no-pr-check` turns the lookup
+off.
 
 State-changing, **only after explicit user approval of that specific finding**:
 
@@ -115,17 +121,19 @@ never edit Sonar settings or exclusions without explicit approval.
 
 ## Fix loop
 
-1. Pick the highest-ranked finding the user approved for fixing. Before
-   creating a branch, check the forge for an already-open PR/MR on that
-   finding: the key is in the body's SonarQube URL, the PR has the `sonar`
-   label, and the head is typically `sonar/<rule>-<key>`. Example:
-   `gh pr list --state open --label sonar --search "<key> in:body"`. If `gh`
-   is not available: `git ls-remote --heads origin 'sonar/*<key>*'`. If one
-   exists, tell the user (with the PR link), do not open another, and ask
-   how to proceed. `sqa` has no skip or defer command; only run `sqa next`
-   after the user agrees. Otherwise check out the default branch and pull
-   it (`git pull --ff-only`), then branch from it (e.g. `sonar/<rule>-<key>`,
-   lowercased and sanitized); never stack on a previous fix branch. One
+1. Pick the highest-ranked finding the user approved for fixing. `sqa next`
+   already skips findings with an already-open PR (the key is in the PR body's
+   SonarQube URL, or the head branch is `sonar/<rule>-<key>`). If the brief or
+   `findings` shows a `pr` for the finding, tell the user (with the PR link),
+   do not open another, and ask how to proceed. If `pr_check` is `unavailable`
+   or `git` (a remote branch, maybe without a PR), check yourself before
+   branching, e.g. `gh pr list --state open --label sonar --search "<key> in:body"`
+   or `git ls-remote --heads origin 'sonar/*<key>*'`. To pass over a finding the
+   user wants to leave for now, run `sqa next --skip <key>` (repeatable); never
+   skip findings on your own to avoid them. Otherwise check out the default
+   branch and pull it (`git pull --ff-only`), then branch from it (e.g.
+   `sonar/<rule>-<key>`, lowercased and sanitized; keep the key at the end so
+   sqa can find the branch); never stack on a previous fix branch. One
    finding per branch/PR unless the user explicitly approved grouping those
    findings. Ask before creating the branch, pushing or opening the PR (a
    visible write), unless the fix approval already included that.
@@ -144,4 +152,5 @@ never edit Sonar settings or exclusions without explicit approval.
    with the harness's normal git/forge tooling. Never merge it yourself.
 4. SonarQube only updates after a new analysis (CI or the user's usual scan). After
    it runs, verify with `sqa show <key>` or `sqa findings`. Return to the default
-   branch, pull it, run `sqa next`, and present that finding before touching it.
+   branch, pull it, run `sqa next` (it skips the finding you just opened a PR
+   for), and present that finding before touching it.
