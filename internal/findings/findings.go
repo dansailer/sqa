@@ -182,6 +182,9 @@ func FromHotspot(h sonarcli.Hotspot, comps []sonarcli.Component, newCode bool) F
 		File: sonarcli.FilePath(h.Component, comps), Line: h.Line, NewCode: newCode,
 		Status: h.Status, Message: h.Message, Severity: sev(h.VulnerabilityProbability),
 	}
+	if h.Resolution != "" {
+		f.Status += "/" + h.Resolution
+	}
 	if f.Line == 0 && h.TextRange != nil {
 		f.Line = h.TextRange.StartLine
 	}

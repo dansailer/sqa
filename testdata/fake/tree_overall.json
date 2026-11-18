@@ -1,0 +1,9 @@
+{"paging": {"pageIndex": 1, "pageSize": 20, "total": 2},
+ "components": [
+  {"key": "demo:internal/legacy/old.go", "path": "internal/legacy/old.go", "qualifier": "FIL", "measures": [
+    {"metric": "coverage", "value": "10.0"}, {"metric": "lines_to_cover", "value": "200"},
+    {"metric": "uncovered_lines", "value": "180"}, {"metric": "uncovered_conditions", "value": "30"}]},
+  {"key": "demo:internal/api/users.go", "path": "internal/api/users.go", "qualifier": "FIL", "measures": [
+    {"metric": "coverage", "value": "55.0"}, {"metric": "lines_to_cover", "value": "40"},
+    {"metric": "uncovered_lines", "value": "18"}, {"metric": "uncovered_conditions", "value": "2"}]}
+ ]}

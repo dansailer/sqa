@@ -1,0 +1,21 @@
+{
+  "paging": {"pageIndex": 1, "pageSize": 500, "total": 1},
+  "hotspots": [
+    {
+      "key": "HS-ACK",
+      "component": "demo:internal/web/cookie.go",
+      "project": "demo",
+      "securityCategory": "insecure-conf",
+      "vulnerabilityProbability": "MEDIUM",
+      "status": "REVIEWED",
+      "resolution": "ACKNOWLEDGED",
+      "line": 31,
+      "message": "Make sure creating this cookie without the \"secure\" flag is safe here.",
+      "ruleKey": "go:S2092",
+      "flows": []
+    }
+  ],
+  "components": [
+    {"key": "demo:internal/web/cookie.go", "qualifier": "FIL", "name": "cookie.go", "longName": "internal/web/cookie.go", "path": "internal/web/cookie.go"}
+  ]
+}

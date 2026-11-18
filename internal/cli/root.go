@@ -138,7 +138,7 @@ All server traffic goes through 'sonar'; sqa never handles tokens and never uses
 	}
 	root.PersistentFlags().StringVar(&a.format, "format", "", "output format: toon|json|md|table (default: table on a TTY, toon otherwise)")
 	root.AddCommand(
-		a.setupCmd(), a.doctorCmd(), a.authCmd(), a.findingsCmd(), a.nextCmd(), a.showCmd(),
+		a.setupCmd(), a.doctorCmd(), a.authCmd(), a.findingsCmd(), a.nextCmd(), a.showCmd(), a.coverageCmd(),
 		a.markCmd(), a.hotspotCmd(), a.skillCmd(), a.versionCmd(),
 	)
 	return root

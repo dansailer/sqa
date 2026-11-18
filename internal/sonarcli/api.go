@@ -188,6 +188,7 @@ type SearchHotspotsOptions struct {
 	Files       []string
 	NewCode     bool
 	Status      string
+	Resolution  string
 }
 
 // SearchHotspots calls /api/hotspots/search through `sonar api get`, following
@@ -203,6 +204,7 @@ func (r *Runner) SearchHotspots(ctx context.Context, o SearchHotspotsOptions, li
 		setIf(q, "branch", o.Branch)
 		setIf(q, "pullRequest", o.PullRequest)
 		setIf(q, "status", o.Status)
+		setIf(q, "resolution", o.Resolution)
 		if len(o.Files) > 0 {
 			q.Set("files", strings.Join(o.Files, ","))
 		}
@@ -283,12 +285,17 @@ func (r *Runner) ShowRule(ctx context.Context, key string) (*Rule, error) {
 	return &resp.Rule, nil
 }
 
-// SourceLines calls /api/sources/lines for [from, to].
+// SourceLines calls /api/sources/lines for [from, to] (the whole file when
+// from and to are 0).
 func (r *Runner) SourceLines(ctx context.Context, component string, from, to int, branch, pr string) ([]SourceLine, error) {
 	q := url.Values{}
 	q.Set("key", component)
-	q.Set("from", strconv.Itoa(from))
-	q.Set("to", strconv.Itoa(to))
+	if from > 0 {
+		q.Set("from", strconv.Itoa(from))
+	}
+	if to > 0 {
+		q.Set("to", strconv.Itoa(to))
+	}
 	setIf(q, "branch", branch)
 	setIf(q, "pullRequest", pr)
 	out, err := r.APIGet(ctx, "/api/sources/lines", q)
@@ -345,4 +352,28 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "…"
+}
+
+// ReopenHotspot calls /api/hotspots/change_status with status TO_REVIEW (a
+// resolution is not allowed then).
+func (r *Runner) ReopenHotspot(ctx context.Context, key, comment string) error {
+	_, err := r.APIPost(ctx, "/api/hotspots/change_status", map[string]string{
+		"hotspot": key, "status": "TO_REVIEW", "comment": comment,
+	})
+	return err
+}
+
+// CommentHotspot calls /api/hotspots/add_comment (an internal endpoint the
+// SonarQube UI uses, available since 8.1).
+func (r *Runner) CommentHotspot(ctx context.Context, key, comment string) error {
+	_, err := r.APIPost(ctx, "/api/hotspots/add_comment", map[string]string{"hotspot": key, "comment": comment})
+	return err
+}
+
+// AssignHotspot calls /api/hotspots/assign (an internal endpoint the
+// SonarQube UI uses, available since 8.2). The server only allows it on
+// TO_REVIEW or ACKNOWLEDGED hotspots.
+func (r *Runner) AssignHotspot(ctx context.Context, key, assignee, comment string) error {
+	_, err := r.APIPost(ctx, "/api/hotspots/assign", map[string]string{"hotspot": key, "assignee": assignee, "comment": comment})
+	return err
 }

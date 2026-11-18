@@ -1,0 +1,8 @@
+{"component": {"key": "demo:internal/api", "name": "api", "qualifier": "DIR", "path": "internal/api", "measures": [
+  {"metric": "new_coverage", "period": {"index": 1, "value": "50.0"}},
+  {"metric": "new_lines_to_cover", "period": {"index": 1, "value": "20"}},
+  {"metric": "new_uncovered_lines", "period": {"index": 1, "value": "10"}},
+  {"metric": "new_uncovered_conditions", "period": {"index": 1, "value": "2"}},
+  {"metric": "coverage", "value": "60.0"}, {"metric": "lines_to_cover", "value": "100"},
+  {"metric": "uncovered_lines", "value": "40"}, {"metric": "uncovered_conditions", "value": "6"}
+]}}

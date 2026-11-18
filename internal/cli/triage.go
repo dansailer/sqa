@@ -9,6 +9,7 @@ import (
 
 	"github.com/dansailer/sqa/internal/approval"
 	"github.com/dansailer/sqa/internal/config"
+	"github.com/dansailer/sqa/internal/sonarcli"
 )
 
 // ChangeResult reports a (possibly dry-run) state change.
@@ -99,30 +100,64 @@ func (a *app) markCmd() *cobra.Command {
 	return cmd
 }
 
+// hotspotVerbs lists every `sqa hotspot` action for help and errors.
+func hotspotVerbs() string {
+	return verbs(approval.HotspotResolutions) + "|reopen|comment|assign <login>"
+}
+
 func (a *app) hotspotCmd() *cobra.Command {
 	var c changeFlags
 	cmd := &cobra.Command{
-		Use:   "hotspot <hotspot-key> " + verbs(approval.HotspotResolutions),
-		Short: "Review a security hotspot as safe / fixed / acknowledged (requires --approved-by-user and --comment)",
-		Args:  cobra.ExactArgs(2),
+		Use:   "hotspot <hotspot-key> " + hotspotVerbs(),
+		Short: "Review, reopen, comment on or assign a security hotspot (requires --approved-by-user and --comment)",
+		Long: `Changes a security hotspot in SonarQube, only after the user approved this exact change:
+
+  safe|fixed|acknowledged  review it (status REVIEWED with that resolution)
+  reopen                   set it back to TO_REVIEW
+  comment                  add --comment without changing anything else
+  assign <login>           assign it to a SonarQube user (TO_REVIEW or ACKNOWLEDGED only)
+
+Every action needs --approved-by-user and a --comment (posted with an [sqa]
+prefix), supports --dry-run and is written to the audit log.`,
+		Args: cobra.RangeArgs(2, 3),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			key, verb := args[0], strings.ToLower(args[1])
-			resolution, ok := approval.HotspotResolutions[verb]
-			if !ok {
-				return usageErr("unknown verdict %q (use %s)", args[1], verbs(approval.HotspotResolutions))
+			var res ChangeResult
+			var do func(r *sonarcli.Runner) error
+			switch {
+			case verb == "assign":
+				if len(args) != 3 || strings.TrimSpace(args[2]) == "" {
+					return usageErr("assign needs a login: sqa hotspot <key> assign <login>")
+				}
+				login := strings.TrimSpace(args[2])
+				res = ChangeResult{Action: "assign " + login, APICall: "POST /api/hotspots/assign assignee=" + login}
+				do = func(r *sonarcli.Runner) error { return r.AssignHotspot(cmd.Context(), key, login, res.Comment) }
+			case len(args) == 3:
+				return usageErr("only assign takes a third argument")
+			case verb == "reopen":
+				res = ChangeResult{Action: verb, APICall: "POST /api/hotspots/change_status status=TO_REVIEW"}
+				do = func(r *sonarcli.Runner) error { return r.ReopenHotspot(cmd.Context(), key, res.Comment) }
+			case verb == "comment":
+				res = ChangeResult{Action: verb, APICall: "POST /api/hotspots/add_comment"}
+				do = func(r *sonarcli.Runner) error { return r.CommentHotspot(cmd.Context(), key, res.Comment) }
+			default:
+				resolution, ok := approval.HotspotResolutions[verb]
+				if !ok {
+					return usageErr("unknown action %q (use %s)", args[1], hotspotVerbs())
+				}
+				res = ChangeResult{Action: verb, APICall: "POST /api/hotspots/change_status status=REVIEWED resolution=" + resolution}
+				do = func(r *sonarcli.Runner) error { return r.ReviewHotspot(cmd.Context(), key, resolution, res.Comment) }
 			}
 			if err := approval.Check(c.approved, c.comment); err != nil {
 				return err
 			}
-			comment := approval.ServerComment(c.comment)
-			res := ChangeResult{Key: key, Kind: "hotspot", Action: verb, Comment: comment, DryRun: c.dryRun,
-				APICall: "POST /api/hotspots/change_status status=REVIEWED resolution=" + resolution}
+			res.Key, res.Kind, res.Comment, res.DryRun = key, "hotspot", approval.ServerComment(c.comment), c.dryRun
 			return a.applyChange(cmd, &res, func() error {
 				r, err := a.runner()
 				if err != nil {
 					return err
 				}
-				return r.ReviewHotspot(cmd.Context(), key, resolution, comment)
+				return do(r)
 			})
 		},
 	}

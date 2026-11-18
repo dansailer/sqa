@@ -49,7 +49,7 @@ func newEnv(t *testing.T) *env {
 		}
 	}
 	for _, k := range []string{"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "FAKE_AUTH_EXIT", "FAKE_POST_FAIL", "FAKE_NO_PROJECT",
-		"FAKE_AUTH_STDERR", "FAKE_WRITE_CREDS", "SONARQUBE_CLI_KEYCHAIN_FILE", "SONAR_USER_HOME"} {
+		"FAKE_AUTH_STDERR", "FAKE_WRITE_CREDS", "FAKE_ACK", "FAKE_GATE", "FAKE_NO_NEWCODE", "FAKE_NO_LINEHITS", "SONARQUBE_CLI_KEYCHAIN_FILE", "SONAR_USER_HOME"} {
 		t.Setenv(k, "")
 	}
 	t.Setenv("HOME", home)
@@ -563,7 +563,7 @@ func TestSkillInstallAndPrint(t *testing.T) {
 	if !strings.HasPrefix(string(b), "---\nname: sqa\ndescription: ") {
 		t.Fatalf("frontmatter: %.80s", b)
 	}
-	for _, must := range []string{"No MCP", "sonar integrate", "sonar api", "--approved-by-user", "Stop and ask the user explicitly", "Never mark a finding as false positive or accepted to reduce the count", "Conventional Commits", "sonar.tests", "SonarQube URL", "`sonar` label", "not the raw finding key", "already-open PR", "in:body", "sqa next --skip <key>", "pr_check"} {
+	for _, must := range []string{"No MCP", "sonar integrate", "sonar api", "--approved-by-user", "Stop and ask the user explicitly", "Never mark a finding as false positive or accepted to reduce the count", "Conventional Commits", "sonar.tests", "SonarQube URL", "`sonar` label", "not the raw finding key", "already-open PR", "in:body", "sqa next --skip <key>", "pr_check", "sqa coverage --file", "ACKNOWLEDGED", "hotspot <hotspot-key> reopen", "assign <login>", "Writing tests is normal"} {
 		if !strings.Contains(string(b), must) {
 			t.Errorf("SKILL.md missing %q", must)
 		}

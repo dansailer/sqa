@@ -1,0 +1,12 @@
+{"sources": [
+  {"line": 20, "code": "func getUser() {", "isNew": false, "lineHits": 0},
+  {"line": 21, "code": "\tid := r.URL.Query().Get(\"id\")", "isNew": true, "lineHits": 3},
+  {"line": 22, "code": "\tif id == \"\" {", "isNew": true, "lineHits": 3, "conditions": 2, "coveredConditions": 1},
+  {"line": 23, "code": "\t\treturn", "isNew": true, "lineHits": 0},
+  {"line": 24, "code": "\t}", "isNew": true},
+  {"line": 25, "code": "\tq := build(id)", "isNew": true, "lineHits": 0},
+  {"line": 26, "code": "\tlog(q)", "isNew": true, "lineHits": 0},
+  {"line": 27, "code": "\trows, _ := db.Query(q)", "isNew": true, "lineHits": 2, "conditions": 4, "coveredConditions": 4},
+  {"line": 28, "code": "\tif rows == nil { panic(1) }", "isNew": true, "lineHits": 2, "conditions": 2},
+  {"line": 29, "code": "}", "isNew": false, "lineHits": 0}
+]}

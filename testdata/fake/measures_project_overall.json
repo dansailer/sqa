@@ -1,0 +1,6 @@
+{"component": {"key": "demo", "name": "demo", "qualifier": "TRK", "measures": [
+  {"metric": "coverage", "value": "71.3"},
+  {"metric": "lines_to_cover", "value": "1200"},
+  {"metric": "uncovered_lines", "value": "300"},
+  {"metric": "uncovered_conditions", "value": "44"}
+]}}

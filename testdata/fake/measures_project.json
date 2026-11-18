@@ -1,0 +1,10 @@
+{"component": {"key": "demo", "name": "demo", "qualifier": "TRK", "measures": [
+  {"metric": "new_coverage", "period": {"index": 1, "value": "62.5", "bestValue": false}},
+  {"metric": "new_lines_to_cover", "period": {"index": 1, "value": "40", "bestValue": false}},
+  {"metric": "new_uncovered_lines", "period": {"index": 1, "value": "12", "bestValue": false}},
+  {"metric": "new_uncovered_conditions", "period": {"index": 1, "value": "3", "bestValue": false}},
+  {"metric": "coverage", "value": "71.3", "bestValue": false},
+  {"metric": "lines_to_cover", "value": "1200"},
+  {"metric": "uncovered_lines", "value": "300"},
+  {"metric": "uncovered_conditions", "value": "44"}
+]}}

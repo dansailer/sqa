@@ -1,0 +1,8 @@
+{"component": {"key": "demo:internal/api/users.go", "name": "users.go", "qualifier": "FIL", "path": "internal/api/users.go", "measures": [
+  {"metric": "new_coverage", "period": {"index": 1, "value": "40.0"}},
+  {"metric": "new_lines_to_cover", "period": {"index": 1, "value": "10"}},
+  {"metric": "new_uncovered_lines", "period": {"index": 1, "value": "6"}},
+  {"metric": "new_uncovered_conditions", "period": {"index": 1, "value": "1"}},
+  {"metric": "coverage", "value": "55.0"}, {"metric": "lines_to_cover", "value": "40"},
+  {"metric": "uncovered_lines", "value": "18"}, {"metric": "uncovered_conditions", "value": "2"}
+]}}

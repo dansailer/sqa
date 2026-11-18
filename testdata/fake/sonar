@@ -52,18 +52,40 @@ case "$1" in
     fi
     case "$path" in
       /api/server/version*) cat "$d/server_version.txt" ;;
+      /api/hotspots/search*resolution=ACKNOWLEDGED*)
+        # Acknowledged hotspots only when a test sets FAKE_ACK; never on new code.
+        case "$path" in
+          *inNewCodePeriod=true*) echo '{"paging":{"pageIndex":1,"pageSize":500,"total":0},"hotspots":[],"components":[]}' ;;
+          *) if [ -n "${FAKE_ACK:-}" ]; then cat "$d/hotspots_ack.json"; else echo '{"paging":{"pageIndex":1,"pageSize":500,"total":0},"hotspots":[],"components":[]}'; fi ;;
+        esac ;;
       /api/hotspots/search*inNewCodePeriod=true*) cat "$d/hotspots_newcode.json" ;;
       /api/hotspots/search*) cat "$d/hotspots.json" ;;
       /api/hotspots/show*)
         case "$path" in
           *hotspot=HS-1*) cat "$d/hotspot_show.json" ;;
+          *hotspot=HS-ACK*) sed -e 's/"key": "HS-1"/"key": "HS-ACK"/' -e 's/"status": "TO_REVIEW"/"status": "REVIEWED", "resolution": "ACKNOWLEDGED"/' "$d/hotspot_show.json" ;;
           *) echo "SonarQube API error: 404 - {\"errors\":[{\"msg\":\"Hotspot not found\"}]}" >&2; exit 1 ;;
         esac ;;
       /api/issues/search*issues=AX-VULN-OLD*) sed 's/"AX-VULN"/"AX-VULN-OLD"/' "$d/issue_vuln.json" ;;
       /api/issues/search*issues=AX-VULN*) cat "$d/issue_vuln.json" ;;
       /api/issues/search*) echo '{"total":0,"p":1,"ps":100,"paging":{"pageIndex":1,"pageSize":100,"total":0},"issues":[],"components":[]}' ;;
       /api/rules/show*) cat "$d/rule_show.json" ;;
-      /api/sources/lines*) cat "$d/sources_lines.json" ;;
+      /api/sources/lines*from=*) cat "$d/sources_lines.json" ;;
+      /api/sources/lines*)
+        if [ -n "${FAKE_NO_LINEHITS:-}" ]; then cat "$d/sources_lines.json"; else cat "$d/sources_coverage.json"; fi ;;
+      /api/qualitygates/project_status*)
+        case "${FAKE_GATE:-}" in
+          nocov) cat "$d/gate_status_nocov.json" ;;
+          fail) echo "SonarQube API error: 404 - {\"errors\":[{\"msg\":\"Project has not been analyzed yet\"}]}" >&2; exit 1 ;;
+          *) cat "$d/gate_status.json" ;;
+        esac ;;
+      /api/measures/component_tree*'&s=metricPeriod'*) cat "$d/tree_newcode.json" ;;
+      /api/measures/component_tree*) cat "$d/tree_overall.json" ;;
+      /api/measures/component*component=demo%3Ainternal%2Fapi%2Fusers.go*) cat "$d/measures_file.json" ;;
+      /api/measures/component*component=demo%3Ainternal%2Fapi\&*) cat "$d/measures_dir.json" ;;
+      /api/measures/component*component=demo%3A*) echo "SonarQube API error: 404 - {\"errors\":[{\"msg\":\"Component key not found\"}]}" >&2; exit 1 ;;
+      /api/measures/component*)
+        if [ -n "${FAKE_NO_NEWCODE:-}" ]; then cat "$d/measures_project_overall.json"; else cat "$d/measures_project.json"; fi ;;
       *) echo "SonarQube API error: 404 - unknown $path" >&2; exit 1 ;;
     esac
     exit 0 ;;

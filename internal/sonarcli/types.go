@@ -169,6 +169,11 @@ type SourceLine struct {
 	Line  int    `json:"line"`
 	Code  string `json:"code"`
 	IsNew bool   `json:"isNew,omitempty"`
+	// Coverage fields are present only on lines the imported coverage report
+	// covers (nil otherwise).
+	LineHits          *int `json:"lineHits,omitempty"`
+	Conditions        *int `json:"conditions,omitempty"`
+	CoveredConditions *int `json:"coveredConditions,omitempty"`
 }
 
 var reTags = regexp.MustCompile(`<[^>]*>`)

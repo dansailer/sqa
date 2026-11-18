@@ -20,6 +20,7 @@ type scopeFlags struct {
 	minSeverity               string
 	securityOnly              bool
 	noPRCheck                 bool
+	noAcknowledged            bool
 }
 
 func (s *scopeFlags) register(cmd *cobra.Command) {
@@ -31,6 +32,7 @@ func (s *scopeFlags) register(cmd *cobra.Command) {
 	f.BoolVar(&s.newCode, "new-code", false, "only findings on new code")
 	f.StringVar(&s.minSeverity, "min-severity", "", "minimum severity: BLOCKER, HIGH|CRITICAL, MEDIUM|MAJOR, LOW|MINOR, INFO")
 	f.BoolVar(&s.securityOnly, "security-only", false, "only vulnerabilities and security hotspots")
+	f.BoolVar(&s.noAcknowledged, "no-acknowledged", false, "hide hotspots reviewed as ACKNOWLEDGED (fix pending); shown by default")
 	f.BoolVar(&s.noPRCheck, "no-pr-check", false, "do not look for open fix PRs on the forge (gh / git ls-remote)")
 }
 
@@ -46,6 +48,20 @@ type FindingsResult struct {
 	PRCheck  string             `json:"pr_check"`
 	Note     string             `json:"note,omitempty"`
 	Findings []findings.Finding `json:"findings"`
+	// Summary is the quality gate read-out (coverage, hotspots reviewed);
+	// nil with --no-summary.
+	Summary *GateSummary `json:"summary,omitempty"`
+}
+
+func (r FindingsResult) summaryText(prefix string) string {
+	if r.Summary == nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, l := range r.Summary.Lines() {
+		b.WriteString(prefix + l + "\n")
+	}
+	return b.String()
 }
 
 // Markdown renders a markdown table.
@@ -58,12 +74,18 @@ func (r FindingsResult) Markdown() string {
 	}
 	if len(r.Findings) == 0 {
 		b.WriteString("No open findings.\n")
+		if t := r.summaryText(""); t != "" {
+			b.WriteString("\n" + t)
+		}
 		return b.String()
 	}
-	b.WriteString("| # | category | severity | key | rule | location | new | PR | message |\n|---|---|---|---|---|---|---|---|---|\n")
+	b.WriteString("| # | category | severity | status | key | rule | location | new | PR | message |\n|---|---|---|---|---|---|---|---|---|---|\n")
 	for _, f := range r.Findings {
-		fmt.Fprintf(&b, "| %d | %s | %s | %s | %s | %s | %s | %s | %s |\n", f.Rank, f.Category, f.SeverityStr, f.Key, f.Rule,
+		fmt.Fprintf(&b, "| %d | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n", f.Rank, f.Category, f.SeverityStr, f.Status, f.Key, f.Rule,
 			output.MDEscape(loc(f)), yesNo(f.NewCode), output.MDEscape(f.PR), output.MDEscape(f.Message))
+	}
+	if t := r.summaryText(""); t != "" {
+		b.WriteString("\n" + t)
 	}
 	return b.String()
 }
@@ -76,15 +98,21 @@ func (r FindingsResult) Table() string {
 		fmt.Fprintf(&b, "note: %s\n", r.Note)
 	}
 	if len(r.Findings) == 0 {
-		return b.String()
+		return b.String() + r.summaryText("")
 	}
-	fmt.Fprintf(&b, "%-4s %-15s %-8s %-3s %-22s %-40s %-8s %s\n", "#", "CATEGORY", "SEVERITY", "NEW", "KEY", "LOCATION", "PR", "MESSAGE")
+	fmt.Fprintf(&b, "%-4s %-15s %-8s %-12s %-3s %-22s %-40s %-8s %s\n", "#", "CATEGORY", "SEVERITY", "STATUS", "NEW", "KEY", "LOCATION", "PR", "MESSAGE")
 	for _, f := range r.Findings {
-		fmt.Fprintf(&b, "%-4d %-15s %-8s %-3s %-22s %-40s %-8s %s\n", f.Rank, f.Category, f.SeverityStr, yesNo(f.NewCode), f.Key, clip(loc(f), 40),
+		fmt.Fprintf(&b, "%-4d %-15s %-8s %-12s %-3s %-22s %-40s %-8s %s\n", f.Rank, f.Category, f.SeverityStr, shortStatus(f.Status), yesNo(f.NewCode), f.Key, clip(loc(f), 40),
 			shortPR(f.PR), clip(f.Message, 90))
+	}
+	if t := r.summaryText(""); t != "" {
+		b.WriteString("\n" + t)
 	}
 	return b.String()
 }
+
+// shortStatus drops the REVIEWED/ prefix of an acknowledged hotspot.
+func shortStatus(s string) string { return strings.TrimPrefix(s, "REVIEWED/") }
 
 // shortPR renders a PR reference for the terminal table: `#12` for a
 // GitHub-style URL, `branch` for a remote fix branch, else the reference.
@@ -213,16 +241,32 @@ func (a *app) gather(ctx context.Context, r *sonarcli.Runner, s scopeFlags) (Fin
 	if err != nil {
 		return res, err
 	}
-	newHot := map[string]bool{}
-	if !allNew && len(hs) > 0 {
-		o := hopts
-		o.NewCode = true
-		nh, _, err := r.SearchHotspots(ctx, o, 0)
+	searches := []sonarcli.SearchHotspotsOptions{hopts}
+	if !s.noAcknowledged {
+		// Reviewed as ACKNOWLEDGED means "risk confirmed, fix pending": keep it
+		// in the queue so it does not vanish once someone acknowledged it.
+		ack := hopts
+		ack.Status, ack.Resolution = "REVIEWED", "ACKNOWLEDGED"
+		ah, acomps, err := r.SearchHotspots(ctx, ack, 0)
 		if err != nil {
 			return res, err
 		}
-		for _, h := range nh {
-			newHot[h.Key] = true
+		if len(ah) > 0 {
+			hs, hcomps = append(hs, ah...), append(hcomps, acomps...)
+			searches = append(searches, ack)
+		}
+	}
+	newHot := map[string]bool{}
+	if !allNew && len(hs) > 0 {
+		for _, o := range searches {
+			o.NewCode = true
+			nh, _, err := r.SearchHotspots(ctx, o, 0)
+			if err != nil {
+				return res, err
+			}
+			for _, h := range nh {
+				newHot[h.Key] = true
+			}
 		}
 	}
 	for _, h := range hs {
@@ -254,6 +298,7 @@ func (a *app) findingsCmd() *cobra.Command {
 	var s scopeFlags
 	var limit int
 	var failOn string
+	var noSummary bool
 	cmd := &cobra.Command{
 		Use:   "findings",
 		Short: "List open issues and to-review hotspots, ranked security first",
@@ -288,6 +333,9 @@ then by severity, new code first, file and line.`,
 				res.Findings = res.Findings[:limit]
 				res.Shown = limit
 			}
+			if !noSummary {
+				res.Summary = gateSummary(cmd.Context(), r, res.Project, s.branch, res.PullRequest)
+			}
 			if err := a.out(res); err != nil {
 				return err
 			}
@@ -300,6 +348,7 @@ then by severity, new code first, file and line.`,
 	s.register(cmd)
 	cmd.Flags().IntVar(&limit, "limit", 50, "maximum findings to show (0 = all)")
 	cmd.Flags().StringVar(&failOn, "fail-on", "", "exit 1 if any shown finding has at least this severity")
+	cmd.Flags().BoolVar(&noSummary, "no-summary", false, "skip the quality gate summary (coverage, hotspots reviewed) at the end")
 	return cmd
 }
 
@@ -430,6 +479,9 @@ the lookup off, --skip <key> passes over a finding by hand (repeatable).`,
 				b.PR = f.PR
 				n.Brief = &b
 				n.Hint = "Present this finding with a recommended verdict and ask the user before acting."
+				if f.Status == "REVIEWED/ACKNOWLEDGED" {
+					n.Hint = "This hotspot was reviewed as ACKNOWLEDGED (risk confirmed, fix pending): propose a fix, or ask whether to reopen or mark it safe. Ask the user before acting."
+				}
 				if f.PR != "" {
 					n.Hint = "This finding already has an open fix PR (" + f.PR + "): tell the user and do not open another; ask how to proceed."
 				}

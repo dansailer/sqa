@@ -229,6 +229,10 @@ func loadBrief(ctx context.Context, r *sonarcli.Runner, key string, contextLines
 			Flows: flowSteps(h.Flows, []sonarcli.Component{h.Component}), Verdicts: []string{"fix (then mark fixed)", "safe", "acknowledged"}}
 		if h.Resolution != "" {
 			b.Status += "/" + h.Resolution
+			b.Verdicts = []string{"fix (then mark fixed)", "safe", "acknowledged", "reopen"}
+			if h.Resolution == "ACKNOWLEDGED" {
+				b.Verdicts = []string{"fix (then mark fixed)", "safe", "reopen"}
+			}
 		}
 		component, tr, project = h.Component.Key, h.TextRange, h.Project.Key
 		rule, _ = r.ShowRule(ctx, h.Rule.Key)

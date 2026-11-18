@@ -1,0 +1,3 @@
+{"projectStatus": {"status": "OK", "conditions": [
+  {"status": "OK", "metricKey": "new_reliability_rating", "comparator": "GT", "errorThreshold": "1", "actualValue": "1"}
+]}}
