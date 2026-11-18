@@ -100,7 +100,7 @@ func (pb *prBodyBuilder) fromFinding(f findings.Finding, project string) PRBodyI
 
 // fromKey looks a key up as an issue, then as a hotspot.
 func (pb *prBodyBuilder) fromKey(key string) (PRBodyItem, error) {
-	issue, comps, err := pb.r.GetIssue(pb.ctx, key)
+	issue, comps, err := pb.r.GetIssue(pb.ctx, key, pb.branch, pb.pr)
 	if err != nil {
 		return PRBodyItem{}, err
 	}

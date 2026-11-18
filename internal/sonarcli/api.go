@@ -230,12 +230,15 @@ func (r *Runner) SearchHotspots(ctx context.Context, o SearchHotspotsOptions, li
 	return hs, comps, nil
 }
 
-// GetIssue fetches a single issue by key via /api/issues/search?issues=KEY.
-// It returns (nil, nil) when no issue has that key.
-func (r *Runner) GetIssue(ctx context.Context, key string) (*Issue, []Component, error) {
+// GetIssue fetches a single issue by key via /api/issues/search?issues=KEY,
+// on the given branch or pull request (older servers only search the main
+// branch without them). It returns (nil, nil) when no issue has that key.
+func (r *Runner) GetIssue(ctx context.Context, key, branch, pr string) (*Issue, []Component, error) {
 	q := url.Values{}
 	q.Set("issues", key)
 	q.Set("additionalFields", "_all")
+	setIf(q, "branch", branch)
+	setIf(q, "pullRequest", pr)
 	out, err := r.APIGet(ctx, "/api/issues/search", q)
 	if err != nil {
 		return nil, nil, err

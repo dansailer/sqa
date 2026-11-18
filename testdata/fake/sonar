@@ -42,6 +42,10 @@ case "$1" in
       fi
       echo "Using auto-detected project key: demo" >&2
     fi
+    case " $* " in
+      *" --branch "*|*" --pull-request "*) ;;
+      *) if [ -n "${FAKE_DETECT_PR:-}" ]; then echo "Using pull request ${FAKE_DETECT_PR} (auto-detected from CI)" >&2; fi ;;
+    esac
     if [ $newcode -eq 1 ]; then cat "$d/issues_newcode.json"; else cat "$d/issues.json"; fi
     exit 0 ;;
   api)

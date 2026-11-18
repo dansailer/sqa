@@ -498,7 +498,8 @@ the lookup off, --skip <key> passes over a finding by hand (repeatable).`,
 			n := NextResult{Project: res.Project, Total: res.Total, Remaining: remaining, PRCheck: res.PRCheck, Note: res.Note, Skipped: skipped}
 			if f != nil {
 				n.Finding = f
-				b, err := loadBrief(ctx, r, f.Key, defaultContextLines, s.branch, s.pr)
+				// res.PullRequest includes a PR sonar auto-detected in CI.
+				b, err := loadBrief(ctx, r, f.Key, defaultContextLines, s.branch, res.PullRequest)
 				if err != nil {
 					return err
 				}

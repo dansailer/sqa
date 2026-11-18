@@ -200,7 +200,7 @@ func loadBrief(ctx context.Context, r *sonarcli.Runner, key string, contextLines
 	var tr *sonarcli.TextRange
 	var rule *sonarcli.Rule
 
-	issue, comps, err := r.GetIssue(ctx, key)
+	issue, comps, err := r.GetIssue(ctx, key, branch, pr)
 	if err != nil {
 		return b, err
 	}
