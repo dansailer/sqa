@@ -407,6 +407,10 @@ and `--help`):
   web UI uses, there since 8.1 and 8.2). They are not in the public API docs
   and could change between SonarQube versions.
 - No unassigning, and no editing or deleting comments.
+- SonarQube returns at most 10,000 results per issue or hotspot search. When a
+  project has more, `sqa findings` and `sqa next` print a note on stderr and
+  `findings` sets `truncated: true`; narrow the search with `--file` or
+  `--new-code`.
 
 ## Configuration
 

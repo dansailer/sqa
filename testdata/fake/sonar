@@ -47,7 +47,9 @@ case "$1" in
       # Real sonar picks a PR from the local git branch when given neither.
       *) if [ -n "${FAKE_DETECT_PR:-}" ]; then echo "Using pull request ${FAKE_DETECT_PR} (auto-detected from branch fix/x)" >&2; fi ;;
     esac
-    if [ $newcode -eq 1 ]; then cat "$d/issues_newcode.json"; else cat "$d/issues.json"; fi
+    # FAKE_ISSUES_TOTAL: claim more matches than any page delivers.
+    if [ $newcode -eq 1 ]; then cat "$d/issues_newcode.json"
+    else sed "s/\"total\": 4/\"total\": ${FAKE_ISSUES_TOTAL:-4}/g" "$d/issues.json"; fi
     exit 0 ;;
   api)
     method="$2"; path="$3"

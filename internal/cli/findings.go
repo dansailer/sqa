@@ -47,6 +47,9 @@ type FindingsResult struct {
 	PullRequest string `json:"pull_request,omitempty"`
 	Total       int    `json:"total"`
 	Shown       int    `json:"shown"`
+	// Truncated: SonarQube had more matching issues or hotspots than it
+	// returns (10 000 per search), so the list is incomplete.
+	Truncated bool `json:"truncated,omitempty"`
 	// PRCheck says how open fix PRs were looked up: gh, git (remote
 	// branches only), off (--no-pr-check), unavailable, or none (nothing to check).
 	PRCheck  string             `json:"pr_check"`
@@ -56,6 +59,8 @@ type FindingsResult struct {
 	// nil with --no-summary.
 	Summary *GateSummary `json:"summary,omitempty"`
 }
+
+const truncatedNote = "SonarQube returns at most 10,000 results per search and there were more: the list is incomplete. Narrow the search with --file <path> or --new-code."
 
 func (r FindingsResult) summaryText(prefix string) string {
 	if r.Summary == nil {
@@ -224,10 +229,12 @@ func (a *app) gather(ctx context.Context, r *sonarcli.Runner, s scopeFlags) (Fin
 		serverFile, match = "", m
 	}
 	opts := sonarcli.ListIssuesOptions{Project: project, Branch: listBranch, PullRequest: s.pr, File: serverFile, NewCode: s.newCode}
-	issues, comps, _, err := r.ListIssues(ctx, opts, 0)
+	il, err := r.ListIssues(ctx, opts, 0)
 	if err != nil {
 		return res, err
 	}
+	issues, comps := il.Issues, il.Components
+	capped := il.Capped
 	// On a pull request everything is new code; otherwise ask the server
 	// which findings are on new code.
 	allNew := s.newCode || s.pr != ""
@@ -235,11 +242,12 @@ func (a *app) gather(ctx context.Context, r *sonarcli.Runner, s scopeFlags) (Fin
 	if !allNew && len(issues) > 0 {
 		o := opts
 		o.NewCode = true
-		ni, _, _, err := r.ListIssues(ctx, o, 0)
+		ni, err := r.ListIssues(ctx, o, 0)
 		if err != nil {
 			return res, err
 		}
-		for _, i := range ni {
+		capped = capped || ni.Capped
+		for _, i := range ni.Issues {
 			newIssues[i.Key] = true
 		}
 	}
@@ -252,22 +260,25 @@ func (a *app) gather(ctx context.Context, r *sonarcli.Runner, s scopeFlags) (Fin
 	if serverFile != "" {
 		hopts.Files = []string{serverFile}
 	}
-	hs, hcomps, err := r.SearchHotspots(ctx, hopts, 0)
+	hl, err := r.SearchHotspots(ctx, hopts, 0)
 	if err != nil {
 		return res, err
 	}
+	hs, hcomps := hl.Hotspots, hl.Components
+	capped = capped || hl.Capped
 	searches := []sonarcli.SearchHotspotsOptions{hopts}
 	if !s.noAcknowledged {
 		// Reviewed as ACKNOWLEDGED means "risk confirmed, fix pending": keep it
 		// in the queue so it does not vanish once someone acknowledged it.
 		ack := hopts
 		ack.Status, ack.Resolution = "REVIEWED", "ACKNOWLEDGED"
-		ah, acomps, err := r.SearchHotspots(ctx, ack, 0)
+		al, err := r.SearchHotspots(ctx, ack, 0)
 		if err != nil {
 			return res, err
 		}
-		if len(ah) > 0 {
-			hs, hcomps = append(hs, ah...), append(hcomps, acomps...)
+		capped = capped || al.Capped
+		if len(al.Hotspots) > 0 {
+			hs, hcomps = append(hs, al.Hotspots...), append(hcomps, al.Components...)
 			searches = append(searches, ack)
 		}
 	}
@@ -275,11 +286,12 @@ func (a *app) gather(ctx context.Context, r *sonarcli.Runner, s scopeFlags) (Fin
 	if !allNew && len(hs) > 0 {
 		for _, o := range searches {
 			o.NewCode = true
-			nh, _, err := r.SearchHotspots(ctx, o, 0)
+			nh, err := r.SearchHotspots(ctx, o, 0)
 			if err != nil {
 				return res, err
 			}
-			for _, h := range nh {
+			capped = capped || nh.Capped
+			for _, h := range nh.Hotspots {
 				newHot[h.Key] = true
 			}
 		}
@@ -295,6 +307,10 @@ func (a *app) gather(ctx context.Context, r *sonarcli.Runner, s scopeFlags) (Fin
 	res.Findings = all
 	res.Total = len(all)
 	res.Shown = len(all)
+	if capped {
+		res.Truncated = true
+		_, _ = fmt.Fprintln(a.stderr, "sqa: note: "+truncatedNote)
+	}
 	return res, nil
 }
 

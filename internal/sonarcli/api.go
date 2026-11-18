@@ -164,17 +164,30 @@ func (r *Runner) MainBranch(ctx context.Context, project string) (string, error)
 	return "", fmt.Errorf("project %s has no main branch in /api/project_branches/list", project)
 }
 
-// maxIssuePages caps pagination (SonarQube refuses results past 10 000).
+// maxIssuePages caps pagination: SonarQube refuses results past 10 000
+// (20 pages of 500).
 const maxIssuePages = 20
+
+// IssueList is what ListIssues collected. Capped is set when the server
+// had more matching issues than SonarQube returns (10 000).
+type IssueList struct {
+	Issues     []Issue
+	Components []Component
+	Detected   Detected
+	Capped     bool
+}
+
+// HotspotList is what SearchHotspots collected; Capped as for IssueList.
+type HotspotList struct {
+	Hotspots   []Hotspot
+	Components []Component
+	Capped     bool
+}
 
 // ListIssues runs `sonar list issues --format json`, following pagination
 // until all results (or limit, when > 0) are collected.
-func (r *Runner) ListIssues(ctx context.Context, o ListIssuesOptions, limit int) ([]Issue, []Component, Detected, error) {
-	var (
-		issues []Issue
-		comps  []Component
-		det    Detected
-	)
+func (r *Runner) ListIssues(ctx context.Context, o ListIssuesOptions, limit int) (IssueList, error) {
+	var l IssueList
 	if o.PageSize == 0 {
 		o.PageSize = 500
 	}
@@ -182,29 +195,30 @@ func (r *Runner) ListIssues(ctx context.Context, o ListIssuesOptions, limit int)
 		o.Page = page
 		out, stderr, err := r.Run(ctx, o.Args()...)
 		if err != nil {
-			return nil, nil, det, err
+			return IssueList{}, err
 		}
 		if page == 1 {
-			det = ParseDetected(stderr)
-			if o.Project == "" && det.Project != "" {
-				o.Project = det.Project
+			l.Detected = ParseDetected(stderr)
+			if o.Project == "" && l.Detected.Project != "" {
+				o.Project = l.Detected.Project
 			}
 		}
 		var resp IssuesSearchResponse
 		if err := json.Unmarshal(out, &resp); err != nil {
-			return nil, nil, det, fmt.Errorf("parse sonar list issues output: %w", err)
+			return IssueList{}, fmt.Errorf("parse sonar list issues output: %w", err)
 		}
-		issues = append(issues, resp.Issues...)
-		comps = append(comps, resp.Components...)
+		l.Issues = append(l.Issues, resp.Issues...)
+		l.Components = append(l.Components, resp.Components...)
 		total := resp.Total
 		if resp.Paging.Total > 0 {
 			total = resp.Paging.Total
 		}
-		if len(resp.Issues) == 0 || len(issues) >= total || (limit > 0 && len(issues) >= limit) {
-			break
+		if len(resp.Issues) == 0 || len(l.Issues) >= total || (limit > 0 && len(l.Issues) >= limit) {
+			return l, nil
 		}
 	}
-	return issues, comps, det, nil
+	l.Capped = true
+	return l, nil
 }
 
 // SearchHotspotsOptions maps to /api/hotspots/search parameters.
@@ -220,11 +234,8 @@ type SearchHotspotsOptions struct {
 
 // SearchHotspots calls /api/hotspots/search through `sonar api get`, following
 // pagination.
-func (r *Runner) SearchHotspots(ctx context.Context, o SearchHotspotsOptions, limit int) ([]Hotspot, []Component, error) {
-	var (
-		hs    []Hotspot
-		comps []Component
-	)
+func (r *Runner) SearchHotspots(ctx context.Context, o SearchHotspotsOptions, limit int) (HotspotList, error) {
+	var l HotspotList
 	for page := 1; page <= maxIssuePages; page++ {
 		q := url.Values{}
 		q.Set("project", o.Project)
@@ -242,15 +253,16 @@ func (r *Runner) SearchHotspots(ctx context.Context, o SearchHotspotsOptions, li
 		q.Set("p", strconv.Itoa(page))
 		var resp HotspotsSearchResponse
 		if err := r.getJSON(ctx, "/api/hotspots/search", q, &resp); err != nil {
-			return nil, nil, err
+			return HotspotList{}, err
 		}
-		hs = append(hs, resp.Hotspots...)
-		comps = append(comps, resp.Components...)
-		if len(resp.Hotspots) == 0 || len(hs) >= resp.Paging.Total || (limit > 0 && len(hs) >= limit) {
-			break
+		l.Hotspots = append(l.Hotspots, resp.Hotspots...)
+		l.Components = append(l.Components, resp.Components...)
+		if len(resp.Hotspots) == 0 || len(l.Hotspots) >= resp.Paging.Total || (limit > 0 && len(l.Hotspots) >= limit) {
+			return l, nil
 		}
 	}
-	return hs, comps, nil
+	l.Capped = true
+	return l, nil
 }
 
 // GetIssue fetches a single issue by key via /api/issues/search?issues=KEY,

@@ -29,14 +29,14 @@ func (a *app) resolveScope(ctx context.Context, r *sonarcli.Runner, project, bra
 	if sc.project != "" {
 		return sc, nil
 	}
-	_, _, det, err := r.ListIssues(ctx, sonarcli.ListIssuesOptions{Branch: branch, PullRequest: pr, PageSize: 1}, 1)
+	l, err := r.ListIssues(ctx, sonarcli.ListIssuesOptions{Branch: branch, PullRequest: pr, PageSize: 1}, 1)
 	if err != nil {
 		if isNoProject(err) {
 			return sc, usageErr(noProjectHint)
 		}
 		return sc, err
 	}
-	if sc.project = det.Project; sc.project == "" {
+	if sc.project = l.Detected.Project; sc.project == "" {
 		return sc, usageErr(noProjectHint)
 	}
 	return sc, nil

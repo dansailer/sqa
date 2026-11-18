@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -139,5 +140,29 @@ func TestMarkReportsAppliedTransitionWhenCommentFails(t *testing.T) {
 	a := readAudit(t, e.home)
 	if len(a) != 1 || a[0].Result != "error" || !strings.Contains(a[0].ErrorMsg, "was applied") {
 		t.Errorf("audit: %+v", a)
+	}
+}
+
+func TestFindingsWarnsWhenSonarQubeCapsTheResults(t *testing.T) {
+	e := newEnv(t)
+	code, out, stderr := e.run("findings", "--format", "json", "--no-summary", "--no-pr-check")
+	if code != 0 || strings.Contains(stderr, "10,000") || strings.Contains(out, `"truncated"`) {
+		t.Fatalf("uncapped: exit %d stderr %q", code, stderr)
+	}
+	t.Setenv("FAKE_ISSUES_TOTAL", "25000")
+	code, out, stderr = e.run("findings", "--format", "json", "--no-summary", "--no-pr-check")
+	if code != 0 || !strings.Contains(stderr, "sqa: note: SonarQube returns at most 10,000 results") {
+		t.Fatalf("capped: exit %d stderr %q", code, stderr)
+	}
+	var res FindingsResult
+	if err := json.Unmarshal([]byte(out), &res); err != nil || !res.Truncated {
+		t.Fatalf("truncated not set: %v %.200s", err, out)
+	}
+	pages := strings.Join(e.callsMatching("list issues"), "\n")
+	if !strings.Contains(pages, "--page 20") || strings.Contains(pages, "--page 21") {
+		t.Errorf("want pages up to 20 and no further:\n%s", pages)
+	}
+	if _, toon, _ := e.run("findings", "--format", "toon", "--no-summary", "--no-pr-check"); !strings.Contains(toon, "truncated: true") {
+		t.Errorf("toon: %.300s", toon)
 	}
 }
