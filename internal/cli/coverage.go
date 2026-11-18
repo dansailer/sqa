@@ -334,7 +334,7 @@ Read-only. Data comes from the last analysis that imported a coverage report.`,
 			if err != nil {
 				return err
 			}
-			res, err := gatherCoverage(ctx, r, sc, strings.Trim(file, "/"), top, overall)
+			res, err := gatherCoverage(ctx, r, sc, projectPath(file), top, overall)
 			if err != nil {
 				return err
 			}

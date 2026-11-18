@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -148,6 +149,16 @@ func prIndex(ctx context.Context, off bool) (forge.Index, string) {
 	return ix, ix.Source
 }
 
+// projectPath normalises a --file value to SonarQube's form: forward
+// slashes, no leading "./" and no leading or trailing "/".
+func projectPath(p string) string {
+	p = filepath.ToSlash(strings.TrimSpace(p))
+	for strings.HasPrefix(p, "./") {
+		p = p[2:]
+	}
+	return strings.Trim(p, "/")
+}
+
 func scopeSuffix(branch, pr string) string {
 	switch {
 	case pr != "":
@@ -201,10 +212,10 @@ func (a *app) gather(ctx context.Context, r *sonarcli.Runner, s scopeFlags) (Fin
 	}
 	// A glob is matched by sqa on the full list; a plain path goes to the
 	// server (sonar's --file: a file, or a directory's own files).
-	serverFile := s.file
+	serverFile := projectPath(s.file)
 	var match func(string) bool
-	if findings.IsGlob(s.file) {
-		m, err := findings.CompileGlob(s.file)
+	if findings.IsGlob(serverFile) {
+		m, err := findings.CompileGlob(serverFile)
 		if err != nil {
 			return res, usageErr("bad --file glob %q: %v", s.file, err)
 		}

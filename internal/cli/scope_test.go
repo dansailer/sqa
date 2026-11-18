@@ -70,3 +70,30 @@ func TestShowServerErrorMentioning404IsNotNotFound(t *testing.T) {
 		t.Errorf("unknown key: exit %d, want %d", code, ExitUsage)
 	}
 }
+
+// "./dir/file", "dir/" and similar shell-completed paths reach sonar in
+// SonarQube's form, as `sqa coverage --file` already did.
+func TestFindingsFilePathIsNormalised(t *testing.T) {
+	e := newEnv(t)
+	for _, in := range []string{"./internal/api/", "internal/api/", "/internal/api"} {
+		if code, _, stderr := e.run("findings", "--file", in, "--no-pr-check", "--no-summary", "--format", "json"); code != 0 {
+			t.Fatalf("%s: exit %d %s", in, code, stderr)
+		}
+	}
+	n := 0
+	for _, c := range e.calls() {
+		if strings.HasPrefix(c, "list issues") {
+			n++
+			if !strings.Contains(c, "--file internal/api ") && !strings.HasSuffix(c, "--file internal/api") {
+				t.Errorf("not normalised: %s", c)
+			}
+		}
+	}
+	if n == 0 {
+		t.Fatal("no list issues call")
+	}
+	code, out, _ := e.run("findings", "--file", "./internal/api/**", "--no-pr-check", "--no-summary", "--format", "json")
+	if code != 0 || !strings.Contains(out, `"AX-VULN"`) {
+		t.Errorf("glob with ./ prefix matched nothing: exit %d\n%s", code, out)
+	}
+}
