@@ -35,9 +35,6 @@ type PRBody struct {
 // Markdown returns the block to paste into the PR body.
 func (p PRBody) Markdown() string { return p.Body }
 
-// Table prints the same block.
-func (p PRBody) Table() string { return p.Body }
-
 // mdLinkText escapes characters that would end a Markdown link label.
 func mdLinkText(s string) string {
 	r := strings.NewReplacer(`\`, `\\`, "[", `\[`, "]", `\]`, "\n", " ")

@@ -26,9 +26,6 @@ type ChangeResult struct {
 	AuditFile string `json:"audit_file,omitempty"`
 }
 
-// Markdown renders the change.
-func (c ChangeResult) Markdown() string { return c.Table() }
-
 // Table renders the change.
 func (c ChangeResult) Table() string {
 	verb := "changed"

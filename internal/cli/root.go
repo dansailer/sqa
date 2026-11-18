@@ -281,7 +281,6 @@ type versionInfo struct {
 	Telemetry      string `json:"sonar_telemetry,omitempty"`
 }
 
-func (v versionInfo) Markdown() string { return v.Table() }
 func (v versionInfo) Table() string {
 	var b strings.Builder
 	b.WriteString("sqa " + v.Version)

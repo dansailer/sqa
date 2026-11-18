@@ -14,7 +14,6 @@ type authStatus struct {
 	SonarHome  string `json:"sonar_home"`
 }
 
-func (s authStatus) Markdown() string { return s.Table() }
 func (s authStatus) Table() string {
 	out := "status: " + s.Status
 	if s.Server != "" {

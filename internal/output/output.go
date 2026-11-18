@@ -19,10 +19,23 @@ const (
 	FormatTable = "table"
 )
 
-// Renderable values provide human formats; json/toon use the value itself.
-type Renderable interface {
-	Markdown() string
-	Table() string
+// A value with a Table or Markdown method renders md and table itself; one
+// that has only one of them uses it for both. Anything else is printed as
+// TOON. json and toon always use the value itself.
+type tabler interface{ Table() string }
+type markdowner interface{ Markdown() string }
+
+// human renders v for md or table, or reports false.
+func human(format string, v any) (string, bool) {
+	t, hasT := v.(tabler)
+	m, hasM := v.(markdowner)
+	switch {
+	case hasM && (format == FormatMD || !hasT):
+		return m.Markdown(), true
+	case hasT:
+		return t.Table(), true
+	}
+	return "", false
 }
 
 // Resolve picks the format: an explicit flag wins, otherwise table on a TTY
@@ -57,7 +70,7 @@ func Write(w io.Writer, format string, v any) error {
 		}
 		s = t
 	case FormatMD, FormatTable:
-		r, ok := v.(Renderable)
+		h, ok := human(format, v)
 		if !ok {
 			t, err := EncodeTOON(v)
 			if err != nil {
@@ -66,11 +79,7 @@ func Write(w io.Writer, format string, v any) error {
 			s = t
 			break
 		}
-		if format == FormatMD {
-			s = r.Markdown()
-		} else {
-			s = r.Table()
-		}
+		s = h
 		if !strings.HasSuffix(s, "\n") {
 			s += "\n"
 		}

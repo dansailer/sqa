@@ -97,9 +97,6 @@ func (b Brief) Markdown() string {
 	return s.String()
 }
 
-// Table renders the brief for a terminal.
-func (b Brief) Table() string { return b.Markdown() }
-
 const (
 	defaultContextLines = 5
 	maxSection          = 6000

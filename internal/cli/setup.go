@@ -25,7 +25,6 @@ type setupResult struct {
 	Note string `json:"note,omitempty"`
 }
 
-func (s setupResult) Markdown() string { return s.Table() }
 func (s setupResult) Table() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "sonar CLI %s %s at %s (source: %s)\n", s.Version, s.Status, s.Path, s.Source)

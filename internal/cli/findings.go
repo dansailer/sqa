@@ -384,9 +384,6 @@ type NextResult struct {
 	Hint      string            `json:"hint"`
 }
 
-// Markdown renders the next finding and its brief.
-func (n NextResult) Markdown() string { return n.Table() }
-
 // Table renders a rank header, then the same brief as `sqa show`.
 func (n NextResult) Table() string {
 	var b strings.Builder

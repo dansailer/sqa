@@ -55,7 +55,6 @@ type skillInstallResult struct {
 	Bytes  int    `json:"bytes"`
 }
 
-func (s skillInstallResult) Markdown() string { return s.Table() }
 func (s skillInstallResult) Table() string {
 	return fmt.Sprintf("installed sqa skill (%s) to %s", s.Target, s.Path)
 }
