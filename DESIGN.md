@@ -281,7 +281,7 @@ Resolved:
 2. Pinned `sonar` version: 1.12.0.17622 (stable on 2026-11-17).
 3. Multiple servers: not needed (one internal instance).
 4. Name: `sqa`.
-5. Platforms: release builds are Linux amd64 only for now (macOS/arm64 temporarily not provided).
+5. Platforms: release builds are Linux amd64 and Windows amd64; Windows (`install.ps1`, the bundled `sonar.exe`, the credentials-file DACL) was confirmed on real hardware with an earlier release. macOS and arm64 are not provided for now.
 
 Open:
 
