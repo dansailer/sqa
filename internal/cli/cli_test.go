@@ -49,7 +49,7 @@ func newEnv(t *testing.T) *env {
 		}
 	}
 	for _, k := range []string{"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "FAKE_AUTH_EXIT", "FAKE_POST_FAIL", "FAKE_NO_PROJECT",
-		"FAKE_AUTH_STDERR", "FAKE_WRITE_CREDS", "FAKE_ACK", "FAKE_GATE", "FAKE_NO_NEWCODE", "FAKE_NO_LINEHITS", "FAKE_DETECT_PR", "SONARQUBE_CLI_KEYCHAIN_FILE", "SONAR_USER_HOME"} {
+		"FAKE_AUTH_STDERR", "FAKE_WRITE_CREDS", "FAKE_ACK", "FAKE_GATE", "FAKE_NO_NEWCODE", "FAKE_NO_LINEHITS", "FAKE_DETECT_PR", "FAKE_NO_COVERAGE", "FAKE_TREE_TOTAL", "SONARQUBE_CLI_KEYCHAIN_FILE", "SONAR_USER_HOME"} {
 		t.Setenv(k, "")
 	}
 	t.Setenv("HOME", home)
@@ -194,8 +194,8 @@ func TestFindingsFiltersAndFailOn(t *testing.T) {
 	if code != 0 || res.Total != 4 {
 		t.Errorf("min-severity HIGH: code %d total %d", code, res.Total)
 	}
-	if code, _, _ := e.run("findings", "--fail-on", "BLOCKER"); code != ExitFindings {
-		t.Errorf("fail-on exit %d", code)
+	if code, _, stderr := e.run("findings", "--fail-on", "BLOCKER"); code != ExitFindings || !strings.Contains(stderr, "sqa: findings at or above BLOCKER") {
+		t.Errorf("fail-on exit %d, stderr %q", code, stderr)
 	}
 	if code, _, _ := e.run("findings", "--min-severity", "bogus"); code != ExitUsage {
 		t.Errorf("bad severity exit %d", code)

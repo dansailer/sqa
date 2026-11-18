@@ -90,13 +90,14 @@ case "$1" in
           fail) echo "SonarQube API error: 404 - {\"errors\":[{\"msg\":\"Project has not been analyzed yet\"}]}" >&2; exit 1 ;;
           *) cat "$d/gate_status.json" ;;
         esac ;;
-      /api/measures/component_tree*'&s=metricPeriod'*) cat "$d/tree_newcode.json" ;;
+      /api/measures/component_tree*'&s=metricPeriod'*) sed "s/\"total\": 3/\"total\": ${FAKE_TREE_TOTAL:-3}/" "$d/tree_newcode.json" ;;
       /api/measures/component_tree*) cat "$d/tree_overall.json" ;;
       /api/measures/component*component=demo%3Ainternal%2Fapi%2Fusers.go*) cat "$d/measures_file.json" ;;
       /api/measures/component*component=demo%3Ainternal%2Fapi\&*) cat "$d/measures_dir.json" ;;
       /api/measures/component*component=demo%3A*) echo "SonarQube API error: 404 - {\"errors\":[{\"msg\":\"Component key not found\"}]}" >&2; exit 1 ;;
       /api/measures/component*)
-        if [ -n "${FAKE_NO_NEWCODE:-}" ]; then cat "$d/measures_project_overall.json"; else cat "$d/measures_project.json"; fi ;;
+        if [ -n "${FAKE_NO_COVERAGE:-}" ]; then echo '{"component":{"key":"demo","qualifier":"TRK","measures":[]}}'
+        elif [ -n "${FAKE_NO_NEWCODE:-}" ]; then cat "$d/measures_project_overall.json"; else cat "$d/measures_project.json"; fi ;;
       *) echo "SonarQube API error: 404 - unknown $path" >&2; exit 1 ;;
     esac
     exit 0 ;;

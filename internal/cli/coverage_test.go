@@ -40,8 +40,8 @@ func TestCoverageRanksFilesByUncoveredNewLines(t *testing.T) {
 		t.Errorf("gate: %+v", r.Gate)
 	}
 	// Fully covered files are dropped; ranks follow the server's worst-first order.
-	if r.TotalFiles != 3 || len(r.Files) != 2 {
-		t.Fatalf("files: total=%d %+v", r.TotalFiles, r.Files)
+	if r.FilesWithCoverage != 3 || r.More || len(r.Files) != 2 {
+		t.Fatalf("files: with coverage=%d more=%v %+v", r.FilesWithCoverage, r.More, r.Files)
 	}
 	f := r.Files[0]
 	if f.Rank != 1 || f.File != "internal/api/users.go" || f.Coverage != 40 || f.UncoveredLines != 6 || f.UncoveredConditions != 1 || f.LinesToCover != 10 {
@@ -84,7 +84,7 @@ func TestCoverageOutputs(t *testing.T) {
 		t.Errorf("table:\n%s", out)
 	}
 	code, out, _ = e.run("coverage", "--format", "md")
-	if code != 0 || !strings.Contains(out, "| 1 | internal/api/users.go | 40.0% | 6 | 1 | 10 |") || !strings.Contains(out, "Showing 2 of 3 files") {
+	if code != 0 || !strings.Contains(out, "| 1 | internal/api/users.go | 40.0% | 6 | 1 | 10 |") || !strings.Contains(out, "2 files with uncovered lines or conditions") {
 		t.Errorf("md:\n%s", out)
 	}
 	code, out, _ = e.run("coverage")
@@ -184,8 +184,8 @@ func TestCoverageDirectoryAndUnknownPath(t *testing.T) {
 
 func TestCoverageFailOnAndFlags(t *testing.T) {
 	e := newEnv(t)
-	if code, _, _ := e.run("coverage", "--fail-on", "70"); code != ExitFindings {
-		t.Errorf("62.5 < 70: exit %d, want 1", code)
+	if code, _, stderr := e.run("coverage", "--fail-on", "70"); code != ExitFindings || !strings.Contains(stderr, "coverage on new code 62.5% is below 70%") {
+		t.Errorf("62.5 < 70: exit %d, want 1 and a reason: %q", code, stderr)
 	}
 	if code, _, stderr := e.run("coverage", "--fail-on", "60%"); code != 0 {
 		t.Errorf("62.5 >= 60: exit %d %s", code, stderr)
@@ -291,5 +291,33 @@ func TestFindingsGateSummaryFallbacks(t *testing.T) {
 	}
 	if !strings.Contains(res.Summary.Note, "quality gate unavailable") || res.Summary.Coverage == nil || len(res.Findings) != 6 {
 		t.Errorf("summary: %+v", res.Summary)
+	}
+}
+
+func TestCoverageFailOnWithoutCoverageDataFails(t *testing.T) {
+	e := newEnv(t)
+	t.Setenv("FAKE_NO_COVERAGE", "1")
+	code, _, stderr := e.run("coverage", "--fail-on", "50")
+	if code != ExitFindings || !strings.Contains(stderr, "no coverage data") {
+		t.Fatalf("exit %d, want 1 with a no-data message: %s", code, stderr)
+	}
+	if code, _, stderr := e.run("coverage"); code != 0 {
+		t.Errorf("without --fail-on, missing data is only a note: exit %d %s", code, stderr)
+	}
+}
+
+func TestCoverageSaysWhatTheFileCountsMean(t *testing.T) {
+	e := newEnv(t)
+	_, out, _ := e.run("coverage", "--format", "table")
+	if !strings.Contains(out, "2 files with uncovered lines or conditions") || !strings.Contains(out, "3 files have coverage data; fully covered ones are not listed") || strings.Contains(out, "raise --top") {
+		t.Errorf("table: %s", out)
+	}
+	t.Setenv("FAKE_TREE_TOTAL", "40")
+	r := runCoverage(t, e)
+	if r.FilesWithCoverage != 40 || !r.More {
+		t.Errorf("more files than read: %+v", r)
+	}
+	if _, out, _ := e.run("coverage", "--format", "md"); !strings.Contains(out, "raise --top") {
+		t.Errorf("md without a --top hint: %s", out)
 	}
 }

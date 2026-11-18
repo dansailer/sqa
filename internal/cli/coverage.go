@@ -88,7 +88,8 @@ type CoverageResult struct {
 	UncoveredLines      int            `json:"uncovered_lines"`
 	UncoveredConditions int            `json:"uncovered_conditions"`
 	Gate                *GateCheck     `json:"gate,omitempty"`
-	TotalFiles          int            `json:"total_files"`
+	FilesWithCoverage   int            `json:"files_with_coverage"`
+	More                bool           `json:"more,omitempty"`
 	Files               []CoverageFile `json:"files"`
 	Detail              *FileCoverage  `json:"detail,omitempty"`
 	Note                string         `json:"note,omitempty"`
@@ -138,12 +139,22 @@ func (r CoverageResult) Markdown() string {
 		b.WriteString("No files with uncovered lines.\n")
 		return b.String()
 	}
-	fmt.Fprintf(&b, "Showing %d of %d files, most uncovered lines first.\n\n", len(r.Files), r.TotalFiles)
+	b.WriteString(r.countLine() + "\n\n")
 	b.WriteString("| # | file | coverage | uncovered lines | uncovered conditions | lines to cover |\n|---|---|---|---|---|---|\n")
 	for _, f := range r.Files {
 		fmt.Fprintf(&b, "| %d | %s | %.1f%% | %d | %d | %d |\n", f.Rank, output.MDEscape(f.File), f.Coverage, f.UncoveredLines, f.UncoveredConditions, f.LinesToCover)
 	}
 	return b.String()
+}
+
+// countLine says how many files are listed and how many have coverage data.
+func (r CoverageResult) countLine() string {
+	s := fmt.Sprintf("%d files with uncovered lines or conditions, most uncovered lines first (%d files have coverage data; fully covered ones are not listed).",
+		len(r.Files), r.FilesWithCoverage)
+	if r.More {
+		s += " More files were not read: raise --top (at most 500) or narrow --file."
+	}
+	return s
 }
 
 // Table renders the ranking (or file detail) for a terminal.
@@ -160,6 +171,7 @@ func (r CoverageResult) Table() string {
 	if len(r.Files) == 0 {
 		return b.String()
 	}
+	b.WriteString(r.countLine() + "\n")
 	fmt.Fprintf(&b, "%-4s %-8s %-9s %-10s %-6s %s\n", "#", "COVERAGE", "UNCOVERED", "CONDITIONS", "LINES", "FILE")
 	for _, f := range r.Files {
 		fmt.Fprintf(&b, "%-4d %-8s %-9d %-10d %-6d %s\n", f.Rank, strconv.FormatFloat(f.Coverage, 'f', 1, 64)+"%", f.UncoveredLines, f.UncoveredConditions, f.LinesToCover, f.File)
@@ -272,7 +284,8 @@ and uncovered conditions, plus the quality gate's coverage condition.
 
 --file <file> shows that file's uncovered line ranges and partly covered
 conditions; --file <directory> ranks only the files below it.
---fail-on <percent> exits 1 when coverage in the reported scope is below it.
+--fail-on <percent> exits 1 when coverage in the reported scope is below it,
+or when there is no coverage data to check.
 
 Read-only. Data comes from the last analysis that imported a coverage report.`,
 		Args: cobra.NoArgs,
@@ -304,7 +317,10 @@ Read-only. Data comes from the last analysis that imported a coverage report.`,
 			if err := a.out(res); err != nil {
 				return err
 			}
-			if failOn != "" && res.Coverage != nil && *res.Coverage < failPct {
+			if failOn != "" && res.Coverage == nil {
+				return &ExitError{Code: ExitFindings, Err: fmt.Errorf("--fail-on %s: no coverage data on %s, so coverage cannot be checked (did the analysis import a coverage report?)", failOn, scopeLabel(res.Scope))}
+			}
+			if failOn != "" && *res.Coverage < failPct {
 				return &ExitError{Code: ExitFindings, Err: fmt.Errorf("coverage on %s %s is below %s%%", scopeLabel(res.Scope), pct(res.Coverage), strconv.FormatFloat(failPct, 'f', -1, 64))}
 			}
 			return nil
@@ -317,7 +333,7 @@ Read-only. Data comes from the last analysis that imported a coverage report.`,
 	f.StringVar(&file, "file", "", "a file (show its uncovered lines) or directory (rank its files), path from project root")
 	f.IntVar(&top, "top", 20, "maximum files to show (0 = up to 500)")
 	f.BoolVar(&overall, "overall", false, "rank by overall coverage instead of new code")
-	f.StringVar(&failOn, "fail-on", "", "exit 1 if coverage in the reported scope is below this percentage")
+	f.StringVar(&failOn, "fail-on", "", "exit 1 if coverage in the reported scope is below this percentage or missing")
 	return cmd
 }
 
@@ -380,7 +396,7 @@ func gatherCoverage(ctx context.Context, r *sonarcli.Runner, sc scope, file stri
 	if err != nil {
 		return res, err
 	}
-	res.TotalFiles = total
+	res.FilesWithCoverage, res.More = total, total > len(files)
 	for _, c := range files {
 		cf := CoverageFile{File: c.Path, Coverage: c.Measures[covK], UncoveredLines: measureInt(c, unLinesK),
 			UncoveredConditions: measureInt(c, unCondsK), LinesToCover: measureInt(c, toCoverK)}

@@ -84,7 +84,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return ExitOK
 	}
 	code := exitCode(err)
-	if code != ExitFindings && !errors.Is(err, errSilent) {
+	if !errors.Is(err, errSilent) {
 		_, _ = fmt.Fprintf(stderr, "sqa: %v\n", err)
 	}
 	return code

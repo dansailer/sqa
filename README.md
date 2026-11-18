@@ -275,12 +275,16 @@ Partly covered conditions (line covered/total): 22 (1/2), 28 (0/2)
 - Files are ranked by uncovered lines on **new code**
   (`/api/measures/component_tree`, sorted on the new-code period). Without a
   new-code period, or with `--overall`, it ranks by overall uncovered lines.
-  Fully covered files are left out. `--top N` (default 20, max 500).
+  Fully covered files are left out; `files_with_coverage` counts every file
+  with coverage data in the scope, and `more` says the ranking read only part
+  of them. `--top N` (default 20, max 500).
 - `--file <file>` reads `/api/sources/lines` and lists uncovered line ranges
   and lines with partly covered conditions (on new code unless `--overall`).
   If SonarQube has no line coverage for the file (no `lineHits`), it says so
   instead of reporting it as covered.
-- `--fail-on 80` exits 1 when coverage in the reported scope is below 80%.
+- `--fail-on 80` exits 1 when coverage in the reported scope is below 80%, or
+  when there is no coverage data to check (no coverage report imported), and
+  says why on stderr.
 - It is read-only, so no approval is needed. The skill treats writing tests
   as normal code work: the agent proposes tests and asks before branching or
   opening a PR.
@@ -306,7 +310,7 @@ condition that is already failing, and it shows no line ranges.
 | Code | Meaning |
 | --- | --- |
 | 0 | Success (or nothing at or above `--fail-on`). |
-| 1 | `findings --fail-on` matched, or `coverage --fail-on` coverage is below the percentage. |
+| 1 | `findings --fail-on` matched, or `coverage --fail-on` coverage is below the percentage or missing. The reason is printed on stderr. |
 | 2 | Usage or configuration error (including a missing `sonar`). |
 | 3 | Authentication or server error. |
 | 4 | Approval missing (`--approved-by-user` or `--comment`). |

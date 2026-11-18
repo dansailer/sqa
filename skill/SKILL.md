@@ -92,7 +92,7 @@ Add `--dry-run` to preview a state change. Output defaults to the compact
 TOON format when piped; add `--format json` if you need JSON.
 
 Exit codes: `0` ok, `1` findings at or above `--fail-on` (for `sqa coverage`:
-coverage below `--fail-on <percent>`), `2` usage or config error, `3` auth or
+coverage below `--fail-on <percent>` or no coverage data), `2` usage or config error, `3` auth or
 server error, `4` approval missing.
 
 ## Human in the loop
