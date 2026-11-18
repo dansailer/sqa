@@ -1,7 +1,7 @@
 #!/bin/sh
 # Tests for install.sh: local fake release (file:// and a GitHub API stand-in)
-# plus a checksum mismatch. Optional live check against v0.2.0 is last and
-# skipped if the repository is not reachable.
+# plus a checksum mismatch. A live anonymous install of v0.2.0 is last and
+# skipped if github.com is not reachable.
 set -eu
 
 CDPATH=
@@ -309,23 +309,24 @@ else
 	fail "--help exited non-zero"
 fi
 
-# --- optional live v0.2.0 (does not fail the suite if the private repo is unreachable)
+# --- optional live v0.2.0: anonymous download from the public repository
+# (skipped, not failed, when github.com is unreachable)
 printf '\nLive v0.2.0 release:\n'
-if ! command -v gh >/dev/null 2>&1; then
-	printf 'skipped: gh is not installed\n'
-elif ! gh auth status >/dev/null 2>&1; then
-	printf 'skipped: gh is not authenticated and no usable GitHub token was found\n'
-elif ! gh release view v0.2.0 --repo dansailer/sqa --json tagName,assets >/dev/null 2>&1; then
-	printf 'skipped: gh is authenticated but cannot see dansailer/sqa v0.2.0 (private repo or release not published)\n'
+if ! curl -fsSI --max-time 10 -o /dev/null "https://github.com/dansailer/sqa/releases/tag/v0.2.0" 2>/dev/null; then
+	printf 'skipped: github.com is unreachable\n'
 else
 	live="$work/live"
-	mkdir -p "$live"
-	# Keep the ambient token here (no env -u) so a private download can authenticate.
-	if SQA_INSTALL_DIR="$live" HOME="$live/home" \
+	mkdir -p "$live" "$work/nogh"
+	# No token and no usable gh (a stub that is never logged in): the public
+	# release must install anonymously.
+	printf '#!/bin/sh\nexit 1\n' >"$work/nogh/gh"
+	chmod 755 "$work/nogh/gh"
+	nogh_path="$work/nogh:$PATH"
+	if run SQA_INSTALL_DIR="$live" HOME="$live/home" PATH="$nogh_path" \
 		"$install" --version v0.2.0 --no-skill >"$work/live.log" 2>&1; then
 		if [ -x "$live/sqa" ]; then
 			# version may be a short string; just require it to run
-			if "$live/sqa" version >"$work/live-ver.txt" 2>&1; then
+			if HOME="$live/home" "$live/sqa" version >"$work/live-ver.txt" 2>&1; then
 				pass "live v0.2.0 install"
 				cat "$work/live-ver.txt"
 			else
@@ -338,13 +339,6 @@ else
 	else
 		fail "live v0.2.0 install exited non-zero"
 		cat "$work/live.log" >&2
-	fi
-	# If a token is set, it must not appear in the log. Check without printing it.
-	if [ -n "${GITHUB_TOKEN:-}" ]; then
-		assert_no_secret "$work/live.log" "$GITHUB_TOKEN" "live install (GITHUB_TOKEN)"
-	fi
-	if [ -n "${GH_TOKEN:-}" ]; then
-		assert_no_secret "$work/live.log" "$GH_TOKEN" "live install (GH_TOKEN)"
 	fi
 fi
 
