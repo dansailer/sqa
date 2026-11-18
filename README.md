@@ -240,6 +240,58 @@ The CLI enforces what it can:
 - Every attempt, including dry runs and failures, is appended to
   `~/.local/state/sqa/audit.jsonl` (time, OS user, key, action, comment, result).
 
+## Security hotspots: `sonar` vs `sqa`
+
+A security hotspot is security-sensitive code that someone has to **review**
+before deciding whether it needs a fix. A vulnerability needs a fix. In
+SonarQube a hotspot starts as `TO_REVIEW`. A review sets it to `REVIEWED` with
+the resolution `FIXED`, `SAFE` or `ACKNOWLEDGED` (reviewed, fix still pending).
+
+**What `sonar` 1.12 does with hotspots** (checked in the 1.12.0.17622 source
+and `--help`):
+
+- `sonar list` has only `issues`, `projects` and `orgs`. `sonar list issues`
+  calls `/api/issues/search`, and SonarQube serves hotspots only from
+  `/api/hotspots/*`, so they never show up there.
+- `sonar quality-gate status` reports failing gate conditions and lists the
+  files or issues behind them. Its security breakdown covers vulnerabilities
+  only (the source says "hotspots are out of scope"). A failing "Security
+  Hotspots Reviewed" condition is reported, but without the hotspots behind it.
+- There is no command to show or review a hotspot. The only way is raw
+  `sonar api get /api/hotspots/search`, `/api/hotspots/show` and
+  `sonar api post /api/hotspots/change_status`. That returns raw JSON, and an
+  agent that may run `sonar api` can also POST any other write.
+
+**What `sqa` adds:**
+
+- **Hotspots in the same queue as issues.** `sqa findings` and `sqa next` fetch
+  `TO_REVIEW` hotspots (`/api/hotspots/search`, all pages) and rank them right
+  after vulnerabilities, by review priority (vulnerability probability
+  HIGH > MEDIUM > LOW), then new code first. `--security-only` shows only
+  vulnerabilities and hotspots; `--file`, `--branch`, `--pr` and `--new-code`
+  apply to hotspots too.
+- **A review brief.** `sqa show <hotspot-key>` (and `sqa next`) combine
+  `/api/hotspots/show`, the rule's description sections (what's the risk, how
+  to assess it, how to fix it) and the flagged lines with surrounding code from
+  `/api/sources/lines`. They add a link to the hotspot's page in SonarQube and
+  the possible verdicts: fix (then mark fixed), safe, acknowledged.
+- **A guarded review command.** `sqa hotspot <key> safe|fixed|acknowledged
+  --comment "…" --approved-by-user` sets `REVIEWED` with that resolution and
+  the comment (prefixed `[sqa]`) in one call. It refuses to run without the
+  approval flag and a comment, supports `--dry-run`, and logs every attempt to
+  the audit log. The skill tells agents to present each hotspot with a
+  recommendation and wait for your decision. An agent never needs `sonar api`.
+
+**Not covered yet:**
+
+- Only `TO_REVIEW` hotspots are listed. Once a hotspot is `ACKNOWLEDGED` (fix
+  pending) it leaves the queue, and `sqa` cannot list reviewed hotspots.
+- `sqa` cannot set a hotspot back to `TO_REVIEW`; undo a wrong review in the
+  SonarQube UI.
+- No assigning and no comment-only changes.
+- `sqa` does not show the quality gate, so it does not report the "Security
+  Hotspots Reviewed" condition. Use `sonar quality-gate status` for that.
+
 ## Configuration
 
 `~/.config/sqa/config.yaml` is optional and never holds secrets (override the
