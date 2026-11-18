@@ -100,23 +100,14 @@ func (pb *prBodyBuilder) fromFinding(f findings.Finding, project string) PRBodyI
 
 // fromKey looks a key up as an issue, then as a hotspot.
 func (pb *prBodyBuilder) fromKey(key string) (PRBodyItem, error) {
-	issue, comps, err := pb.r.GetIssue(pb.ctx, key, pb.branch, pb.pr)
+	issue, comps, h, err := lookupKey(pb.ctx, pb.r, key, pb.branch, pb.pr)
 	if err != nil {
 		return PRBodyItem{}, err
 	}
 	if issue != nil {
 		return pb.fromFinding(findings.FromIssue(*issue, comps, false), issue.Project), nil
 	}
-	h, err := pb.r.ShowHotspot(pb.ctx, key)
-	if err != nil {
-		if isNotFound(err) {
-			return PRBodyItem{}, usageErr("no issue or hotspot with key %q", key)
-		}
-		return PRBodyItem{}, err
-	}
-	f := findings.FromHotspot(sonarcli.Hotspot{Key: h.Key, Component: h.Component.Key, RuleKey: h.Rule.Key, Line: h.Line,
-		Message: h.Message, TextRange: h.TextRange}, []sonarcli.Component{h.Component}, false)
-	it := pb.fromFinding(f, h.Project.Key)
+	it := pb.fromFinding(findings.FromHotspot(h.AsHotspot(), comps, false), h.Project.Key)
 	if it.RuleName == "" {
 		it.RuleName = h.Rule.Name
 	}

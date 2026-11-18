@@ -193,13 +193,30 @@ func findingURL(ctx context.Context, r *sonarcli.Runner, project, key, kind, bra
 	return FindingURL(st.Server, project, key, kind, branch, pr)
 }
 
+// lookupKey finds key as an issue on the branch or PR, else as a hotspot.
+// Exactly one of issue and hotspot is set; an unknown key is a usage error.
+func lookupKey(ctx context.Context, r *sonarcli.Runner, key, branch, pr string) (*sonarcli.Issue, []sonarcli.Component, *sonarcli.HotspotDetail, error) {
+	issue, comps, err := r.GetIssue(ctx, key, branch, pr)
+	if err != nil || issue != nil {
+		return issue, comps, nil, err
+	}
+	h, err := r.ShowHotspot(ctx, key)
+	if err != nil {
+		if isNotFound(err) {
+			return nil, nil, nil, usageErr("no issue or hotspot with key %q", key)
+		}
+		return nil, nil, nil, err
+	}
+	return nil, []sonarcli.Component{h.Component}, h, nil
+}
+
 func loadBrief(ctx context.Context, r *sonarcli.Runner, key string, contextLines int, branch, pr string) (Brief, error) {
 	var b Brief
 	var component, project string
 	var tr *sonarcli.TextRange
 	var rule *sonarcli.Rule
 
-	issue, comps, err := r.GetIssue(ctx, key, branch, pr)
+	issue, comps, h, err := lookupKey(ctx, r, key, branch, pr)
 	if err != nil {
 		return b, err
 	}
@@ -212,21 +229,11 @@ func loadBrief(ctx context.Context, r *sonarcli.Runner, key string, contextLines
 		rule, _ = r.ShowRule(ctx, issue.Rule)
 		b.Why, b.Assess, b.HowToFix = ruleSections(rule, issue.RuleDescriptionCtx)
 	} else {
-		h, err := r.ShowHotspot(ctx, key)
-		if err != nil {
-			if isNotFound(err) {
-				return b, usageErr("no issue or hotspot with key %q", key)
-			}
-			return b, err
-		}
-		f := findings.FromHotspot(sonarcli.Hotspot{Key: h.Key, Component: h.Component.Key, RuleKey: h.Rule.Key,
-			VulnerabilityProbability: h.Rule.VulnerabilityProbability, Status: h.Status, Line: h.Line, Message: h.Message, TextRange: h.TextRange},
-			[]sonarcli.Component{h.Component}, false)
+		f := findings.FromHotspot(h.AsHotspot(), comps, false)
 		b = Brief{Key: key, Kind: string(f.Kind), Category: f.Category, Severity: f.SeverityStr, Quality: f.Quality,
-			Status: h.Status, Rule: h.Rule.Key, RuleName: h.Rule.Name, File: f.File, Line: f.Line, Message: h.Message,
-			Flows: flowSteps(h.Flows, []sonarcli.Component{h.Component}), Verdicts: []string{"fix (then mark fixed)", "safe", "acknowledged"}}
+			Status: f.Status, Rule: h.Rule.Key, RuleName: h.Rule.Name, File: f.File, Line: f.Line, Message: h.Message,
+			Flows: flowSteps(h.Flows, comps), Verdicts: []string{"fix (then mark fixed)", "safe", "acknowledged"}}
 		if h.Resolution != "" {
-			b.Status += "/" + h.Resolution
 			b.Verdicts = []string{"fix (then mark fixed)", "safe", "acknowledged", "reopen"}
 			if h.Resolution == "ACKNOWLEDGED" {
 				b.Verdicts = []string{"fix (then mark fixed)", "safe", "reopen"}

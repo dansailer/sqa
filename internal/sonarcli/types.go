@@ -138,6 +138,13 @@ type HotspotDetail struct {
 	Flows      []Flow      `json:"flows,omitempty"`
 }
 
+// AsHotspot returns the search-result view of the hotspot.
+func (h HotspotDetail) AsHotspot() Hotspot {
+	return Hotspot{Key: h.Key, Component: h.Component.Key, Project: h.Project.Key, VulnerabilityProbability: h.Rule.VulnerabilityProbability,
+		Status: h.Status, Resolution: h.Resolution, Line: h.Line, Message: h.Message, Author: h.Author, TextRange: h.TextRange,
+		RuleKey: h.Rule.Key, Flows: h.Flows}
+}
+
 // DescriptionSection is one section of a rule description.
 type DescriptionSection struct {
 	Key     string `json:"key"`
