@@ -42,40 +42,54 @@ func registerNoPRCheck(cmd *cobra.Command, off *bool) {
 
 // FindingsResult is the output of `sqa findings`.
 type FindingsResult struct {
-	// Summary is the quality gate read-out (coverage, hotspots reviewed),
-	// first so it is not missed; nil with --no-summary.
-	Summary     *GateSummary `json:"summary,omitempty"`
-	Project     string       `json:"project"`
-	Branch      string       `json:"branch,omitempty"`
-	PullRequest string       `json:"pull_request,omitempty"`
-	Total       int          `json:"total"`
-	Shown       int          `json:"shown"`
+	Project     string `json:"project"`
+	Branch      string `json:"branch,omitempty"`
+	PullRequest string `json:"pull_request,omitempty"`
+	Total       int    `json:"total"`
+	Shown       int    `json:"shown"`
 	// PRCheck says how open fix PRs were looked up: gh, git (remote
 	// branches only), off (--no-pr-check), unavailable, or none (nothing to check).
 	PRCheck  string             `json:"pr_check"`
 	Note     string             `json:"note,omitempty"`
 	Findings []findings.Finding `json:"findings"`
+	// Summary is the quality gate read-out (coverage, hotspots reviewed);
+	// nil with --no-summary.
+	Summary *GateSummary `json:"summary,omitempty"`
+}
+
+func (r FindingsResult) summaryText(prefix string) string {
+	if r.Summary == nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, l := range r.Summary.Lines() {
+		b.WriteString(prefix + l + "\n")
+	}
+	return b.String()
 }
 
 // Markdown renders a markdown table.
 func (r FindingsResult) Markdown() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "## SonarQube findings: %s%s\n\n", r.Project, scopeSuffix(r.Branch, r.PullRequest))
-	if t := r.Summary.text("- "); t != "" {
-		b.WriteString("### Quality gate\n\n" + t + "\n")
-	}
 	fmt.Fprintf(&b, "Showing %d of %d, ranked security first.\n\n", r.Shown, r.Total)
 	if r.Note != "" {
 		fmt.Fprintf(&b, "Note: %s\n\n", r.Note)
 	}
 	if len(r.Findings) == 0 {
 		b.WriteString("No open findings.\n")
+		if t := r.summaryText(""); t != "" {
+			b.WriteString("\n" + t)
+		}
 		return b.String()
 	}
 	b.WriteString("| # | category | severity | status | key | rule | location | new | PR | message |\n|---|---|---|---|---|---|---|---|---|---|\n")
 	for _, f := range r.Findings {
 		fmt.Fprintf(&b, "| %d | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n", f.Rank, f.Category, f.Severity, f.Status, f.Key, f.Rule,
 			output.MDEscape(loc(f)), yesNo(f.NewCode), output.MDEscape(f.PR), output.MDEscape(f.Message))
+	}
+	if t := r.summaryText(""); t != "" {
+		b.WriteString("\n" + t)
 	}
 	return b.String()
 }
@@ -84,18 +98,19 @@ func (r FindingsResult) Markdown() string {
 func (r FindingsResult) Table() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s%s: %d of %d findings (security first)\n", r.Project, scopeSuffix(r.Branch, r.PullRequest), r.Shown, r.Total)
-	b.WriteString(r.Summary.text("  "))
 	if r.Note != "" {
 		fmt.Fprintf(&b, "note: %s\n", r.Note)
 	}
 	if len(r.Findings) == 0 {
-		return b.String()
+		return b.String() + r.summaryText("")
 	}
-	b.WriteString("\n")
 	fmt.Fprintf(&b, "%-4s %-15s %-8s %-12s %-3s %-22s %-40s %-8s %s\n", "#", "CATEGORY", "SEVERITY", "STATUS", "NEW", "KEY", "LOCATION", "PR", "MESSAGE")
 	for _, f := range r.Findings {
 		fmt.Fprintf(&b, "%-4d %-15s %-8s %-12s %-3s %-22s %-40s %-8s %s\n", f.Rank, f.Category, f.Severity, shortStatus(f.Status), yesNo(f.NewCode), f.Key, clip(loc(f), 40),
 			shortPR(f.PR), clip(f.Message, 90))
+	}
+	if t := r.summaryText(""); t != "" {
+		b.WriteString("\n" + t)
 	}
 	return b.String()
 }
@@ -370,9 +385,6 @@ type Skipped struct {
 
 // NextResult is the output of `sqa next`.
 type NextResult struct {
-	// Gate is the quality gate read-out, first so it is not missed; nil
-	// with --no-summary.
-	Gate      *GateSummary      `json:"gate,omitempty"`
 	Project   string            `json:"project"`
 	Total     int               `json:"total"`
 	Remaining int               `json:"remaining"`
@@ -387,7 +399,6 @@ type NextResult struct {
 // Table renders a rank header, then the same brief as `sqa show`.
 func (n NextResult) Table() string {
 	var b strings.Builder
-	b.WriteString(n.Gate.text(""))
 	if len(n.Skipped) > 0 {
 		var parts []string
 		for _, sk := range n.Skipped {
@@ -407,14 +418,9 @@ func (n NextResult) Table() string {
 	}
 	if n.Finding == nil {
 		if len(n.Skipped) > 0 {
-			b.WriteString("No other open findings in " + n.Project + ".")
-		} else {
-			b.WriteString("No open findings in " + n.Project + ".")
+			return b.String() + "No other open findings in " + n.Project + "."
 		}
-		if n.Hint != "" {
-			b.WriteString("\n" + n.Hint)
-		}
-		return b.String()
+		return b.String() + "No open findings in " + n.Project + "."
 	}
 	fmt.Fprintf(&b, "[%d of %d] %s  (new code: %s, %d remaining)", n.Finding.Rank, n.Total, n.Project, yesNo(n.Finding.NewCode), n.Remaining)
 	if n.Brief != nil {
@@ -452,7 +458,7 @@ func pickNext(fs []findings.Finding, skip map[string]bool, includeOpenPR bool) (
 
 func (a *app) nextCmd() *cobra.Command {
 	var s scopeFlags
-	var noPRCheck, noSummary bool
+	var noPRCheck bool
 	var skip []string
 	var includeOpenPR bool
 	cmd := &cobra.Command{
@@ -502,16 +508,6 @@ the lookup off, --skip <key> passes over a finding by hand (repeatable).`,
 					n.Hint = "This finding already has an open fix PR (" + f.PR + "): tell the user and do not open another; ask how to proceed."
 				}
 			}
-			if !noSummary {
-				n.Gate = gateSummary(ctx, r, res.Project, s.branch, s.pr)
-				if steps := strings.Join(n.Gate.NextSteps, " "); steps != "" {
-					if n.Hint == "" {
-						n.Hint = "No open findings left, but the quality gate is failing. " + steps
-					} else {
-						n.Hint += " Also: " + steps
-					}
-				}
-			}
 			return a.out(n)
 		},
 	}
@@ -519,6 +515,5 @@ the lookup off, --skip <key> passes over a finding by hand (repeatable).`,
 	registerNoPRCheck(cmd, &noPRCheck)
 	cmd.Flags().StringSliceVar(&skip, "skip", nil, "finding key to pass over (repeatable or comma-separated)")
 	cmd.Flags().BoolVar(&includeOpenPR, "include-open-pr", false, "do not skip findings that already have an open fix PR")
-	cmd.Flags().BoolVar(&noSummary, "no-summary", false, "skip the quality gate read-out (coverage, hotspots reviewed)")
 	return cmd
 }

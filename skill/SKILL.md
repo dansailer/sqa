@@ -13,11 +13,7 @@ approves, fixes the code or records a triage decision in SonarQube.
 
 Run `sqa doctor` first. If it fails, stop and relay its fix to the user.
 
-**Always read the quality gate read-out and report it to the user.** It is
-the first thing `sqa findings` (`summary`) and `sqa next` (`gate`) print:
-gate status, coverage and security hotspots reviewed against the gate, and
-`next_steps` when a condition fails. Tell the user about every failing
-condition, even when the finding queue is empty, and follow its next step.
+Report the quality gate summary of `sqa findings` (`summary`) to the user.
 
 ## Hard rules
 
@@ -220,9 +216,8 @@ removes every finding it covers, not just the one you were looking at:
 
 ## Coverage
 
-The gate read-out at the top of `sqa findings` and `sqa next` includes
-coverage. When coverage on new code fails the gate (`next_steps` says so), or
-the user asks about coverage:
+`sqa findings` ends with a coverage line. When coverage on new code fails the
+gate, or the user asks about coverage:
 
 1. Run `sqa coverage` and present the files with the most uncovered lines on
    new code. For a file the user picks, run `sqa coverage --file <file>` to see

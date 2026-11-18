@@ -563,7 +563,7 @@ func TestSkillInstallAndPrint(t *testing.T) {
 	if !strings.HasPrefix(string(b), "---\nname: sqa\ndescription: ") {
 		t.Fatalf("frontmatter: %.80s", b)
 	}
-	for _, must := range []string{"No MCP", "sonar integrate", "sonar api", "--approved-by-user", "Stop and ask the user explicitly", "Never mark a finding as false positive or accepted to reduce the count", "Conventional Commits", "sonar.tests", "SonarQube URL", "`sonar` label", "already-open PR", "in:body", "sqa next --skip <key>", "pr_check", "sqa coverage --file", "ACKNOWLEDGED", "hotspot <hotspot-key> reopen", "assign <login>", "Writing tests is normal", "sqa pr-body", "every finding the PR resolves", "Grouping needs explicit approval", "Never add an unrelated fix silently", "sqa findings --file '<glob>'", "main branch", "derives a branch or PR from the local git checkout", "Always read the quality gate read-out and report it to the user", "next_steps"} {
+	for _, must := range []string{"No MCP", "sonar integrate", "sonar api", "--approved-by-user", "Stop and ask the user explicitly", "Never mark a finding as false positive or accepted to reduce the count", "Conventional Commits", "sonar.tests", "SonarQube URL", "`sonar` label", "already-open PR", "in:body", "sqa next --skip <key>", "pr_check", "sqa coverage --file", "ACKNOWLEDGED", "hotspot <hotspot-key> reopen", "assign <login>", "Writing tests is normal", "sqa pr-body", "every finding the PR resolves", "Grouping needs explicit approval", "Never add an unrelated fix silently", "sqa findings --file '<glob>'", "main branch", "derives a branch or PR from the local git checkout", "Report the quality gate summary"} {
 		if !strings.Contains(string(b), must) {
 			t.Errorf("SKILL.md missing %q", must)
 		}
