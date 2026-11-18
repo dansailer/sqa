@@ -70,12 +70,15 @@ These endpoints are called through `sonar api get|post <path> [--data <json>]`, 
 | Version check | `GET /api/server/version` (plain text) |
 | Token check | `sonar auth status --format json` (not an API call by sqa) |
 | Single issue by key (`sqa show`) | `GET /api/issues/search?issues=<key>&additionalFields=_all` |
-| Hotspots list / detail | `GET /api/hotspots/search` (`status=TO_REVIEW`, `inNewCodePeriod`), `GET /api/hotspots/show` |
-| Hotspot review | `POST /api/hotspots/change_status` |
+| Hotspots list / detail | `GET /api/hotspots/search` (`status=TO_REVIEW`, and `status=REVIEWED&resolution=ACKNOWLEDGED`; `inNewCodePeriod`), `GET /api/hotspots/show` |
+| Hotspot review / reopen | `POST /api/hotspots/change_status` (`REVIEWED` + resolution, or `TO_REVIEW` without one) |
+| Hotspot comment / assign | `POST /api/hotspots/add_comment`, `POST /api/hotspots/assign` (internal endpoints used by the SonarQube UI, since 8.1 / 8.2) |
+| Quality gate (`findings` summary, `coverage`) | `GET /api/qualitygates/project_status` |
+| Coverage measures | `GET /api/measures/component`, `GET /api/measures/component_tree` (`strategy=leaves`, `qualifiers=FIL`, `metricSort=new_uncovered_lines`, `s=metricPeriod`, `metricPeriodSort=1`, `asc=false`; overall: `s=metric`, `metricSort=uncovered_lines`) |
 | Issue transition | `POST /api/issues/do_transition` (`falsepositive`, `accept`, `reopen`) |
 | Issue comment | `POST /api/issues/add_comment` |
 | Rule details | `GET /api/rules/show` |
-| Code context | `GET /api/sources/lines` |
+| Code context, line coverage | `GET /api/sources/lines` (`lineHits`, `conditions`, `coveredConditions`, `isNew`) |
 
 Auth, TLS and proxy: handled by `sonar` (see `sonar config` for proxy/CA settings).
 
@@ -134,8 +137,9 @@ Multiple servers: out of scope (one internal instance). `sonar` keeps one active
 | `sqa setup` | Optional: extract/verify the bundled `sonar`, or download another official version. |
 | `sqa auth login\|status\|logout` | Thin pass-through to `sonar auth …` (login must be run by the user in a terminal). |
 | `sqa doctor` | Check `sonar` installed and version matches (warn on mismatch), authenticated (`sonar auth status`, shows server and source), server ≥ 2025.1 (or Community Build ≥ 25.1). |
-| `sqa findings` | Unified, ranked list of open issues (`OPEN`, `CONFIRMED`) + `TO_REVIEW` hotspots, with a `pr` column (open fix PR, §6.1). Flags: `--project`, `--branch`, `--pr`, `--file`, `--new-code`, `--min-severity`, `--security-only`, `--limit` (default 50, 0 = all), `--fail-on`, `--no-pr-check`, `--format`. |
+| `sqa findings` | Unified, ranked list of open issues (`OPEN`, `CONFIRMED`) + `TO_REVIEW` and `REVIEWED/ACKNOWLEDGED` hotspots, with status and `pr` columns (open fix PR, §6.1), ending with a quality gate summary (§6.2). Flags: `--project`, `--branch`, `--pr`, `--file`, `--new-code`, `--min-severity`, `--security-only`, `--limit` (default 50, 0 = all), `--fail-on`, `--no-acknowledged`, `--no-pr-check`, `--no-summary`, `--format`. |
 | `sqa next` | The highest-priority open finding without an open fix PR, with the same brief as `sqa show` (for one-at-a-time loops). `--skip <key>` (repeatable, comma-separated) passes over findings by hand; `--include-open-pr` turns PR skipping off. Output lists `skipped` (rank, key, reason `open PR` or `--skip`, pr), `total`, `remaining`, `pr_check`, `note`. |
+| `sqa coverage` | Files ranked by uncovered lines on new code (overall without a new-code period or with `--overall`), with coverage %, uncovered lines and conditions and the gate's coverage condition; `--file` for a file's uncovered line ranges and partly covered conditions, or a directory's ranking; `--top`, `--fail-on <percent>` (§6.2). |
 | `sqa show <key>` | Agent-ready brief: rule, rationale (rule description sections `root_cause` / `assess_the_problem` / `how_to_fix`, or hotspot risk text), location, code context (`--context N`, default 5, HTML stripped), data-flow, possible verdicts, next step, and a URL to the finding on the server (from `sonar auth status`; the token is never read). Tries the key as an issue, then as a hotspot. |
 | `sqa version` | sqa version, pinned `sonar` version, whether it is bundled (version, SHA-256) and which `sonar` is in use. |
 
@@ -149,12 +153,27 @@ So an agent does not get stuck on (or duplicate) a finding that already has a fi
 
 `pr_check` values: `gh`, `git`, `unavailable`, `off` (`--no-pr-check`), `none` (no findings, so no lookup). The `pr` field holds the PR URL (or `branch:<name>`), empty otherwise; the table shows `#12`, `!12` (GitLab MR) or `branch`.
 
+### 6.2 Coverage (`sqa coverage`) and the `findings` summary
+
+`sonar` 1.12 has no coverage command; `sonar quality-gate status --category coverage` lists worst-covered files only for an already failing coverage condition and has no line detail. Coverage is therefore its own read-only verb, not a finding type: it has no key, status or triage verdict, does not fit the security-first order, and only changes after the next analysis that imports a coverage report.
+
+- `sqa coverage` resolves the project like `findings` (flags, `default_project`, else one `sonar list issues --page-size 1` call for `sonar`'s auto-detection, including the PR). It reads the scope's measures (`/api/measures/component`; `new_coverage`, `new_lines_to_cover`, `new_uncovered_lines`, `new_uncovered_conditions` and the overall ones), the gate (`/api/qualitygates/project_status`; condition on `new_coverage` or `coverage`), and the files below the scope sorted by uncovered lines (`/api/measures/component_tree`). New-code values come from the measure's `period.value` (or `periods[0].value` on older servers).
+- Scope: new code, unless the project has no `new_lines_to_cover` measure (no new-code period; a note says so) or `--overall`. Fully covered files are dropped from the ranking. `--top N` (default 20, at most 500) is the page size.
+- `--file <path>`: the component `<project>:<path>`. A directory ranks the files below it; a file reads `/api/sources/lines` for the whole file and reports uncovered line ranges (`lineHits == 0`) and lines with `coveredConditions < conditions`, limited to `isNew` lines in the new-code scope. Lines without `lineHits` are not executable or not covered by the report; if no line has coverage data, a note says so. An unknown path is a usage error (exit 2).
+- `--fail-on <percent>` exits 1 when the scope's coverage is below it (no coverage value: no failure).
+- `sqa findings` (not `next`) ends with a `summary`: one `/api/qualitygates/project_status` call for the gate status and the conditions on `new_coverage`/`coverage` and `new_security_hotspots_reviewed`/`security_hotspots_reviewed`; only if the gate has no coverage condition, one `/api/measures/component` call for the coverage value. Errors become `summary.note`; `findings` never fails because of it. Table and Markdown print one line per metric pointing to `sqa coverage`; JSON and TOON carry the `summary` object. `--no-summary` skips the calls.
+
 ### State-changing (require user approval — see §8)
 
 | Command | Description |
 |---------|-------------|
 | `sqa mark <issue-key> fp\|accept\|reopen --comment "…" --approved-by-user` | `do_transition` (`falsepositive`, `accept`, `reopen`), then `add_comment`. |
 | `sqa hotspot <hotspot-key> safe\|fixed\|acknowledged --comment "…" --approved-by-user` | Review a hotspot (status REVIEWED + resolution). |
+| `sqa hotspot <hotspot-key> reopen --comment "…" --approved-by-user` | Back to TO_REVIEW (`change_status` without resolution). |
+| `sqa hotspot <hotspot-key> comment --comment "…" --approved-by-user` | Comment only (`add_comment`). |
+| `sqa hotspot <hotspot-key> assign <login> --comment "…" --approved-by-user` | Assign (`assign`, with the comment); the server allows it only on TO_REVIEW or ACKNOWLEDGED hotspots. |
+
+All of them share the approval rules of §8: `--approved-by-user` and a non-empty `--comment` (exit 4 otherwise), `[sqa]` comment prefix, `--dry-run`, and an audit log line per attempt (action e.g. `reopen`, `comment`, `assign alice`).
 
 ### Skill
 
@@ -173,7 +192,7 @@ So an agent does not get stuck on (or duplicate) a finding that already has a fi
 Every finding is normalised to `{rank, key, kind(issue|hotspot), tier, category, quality, severity, rule, file, line, new_code, status, message}` and ranked:
 
 1. **Tier 1 – Vulnerabilities**: issues with software quality `SECURITY` (MQR mode) / type `VULNERABILITY`.
-2. **Tier 2 – Security Hotspots** with status `TO_REVIEW` (ordered by vulnerability probability HIGH → LOW).
+2. **Tier 2 – Security Hotspots** with status `TO_REVIEW` or reviewed as `ACKNOWLEDGED` (confirmed risk, fix pending), ordered by vulnerability probability HIGH → LOW like the other tiers; `--no-acknowledged` drops the latter.
 3. **Tier 3 – Reliability**: `RELIABILITY` / `BUG`.
 4. **Tier 4 – Maintainability**: `MAINTAINABILITY` / `CODE_SMELL`.
 
@@ -210,6 +229,8 @@ Frontmatter: `name: sqa`, `description: …`. Content:
 - **Hard rules**: never use, install or configure a SonarQube MCP server; never run `sonar integrate` or `sonar api`; never run `sonar auth login` (the user does that); never set, read or print tokens; always ask the user before any triage decision.
 - Triage order (§7) and how to read `next` / `findings` / `show` output.
 - The fix loop: `sqa next` skips findings with an already-open PR/MR (forge lookup, see §6.1); if a finding still shows a `pr`, or the lookup was `unavailable`/`git`, check the forge, do not duplicate and ask the user how to proceed; `--skip <key>` only when the user wants to leave a finding for now → one finding per branch/PR from the up-to-date default branch → fix and commit (Conventional Commits, include the rule key) → tests → open a PR (ask first; never merge; body links the finding by message and rule, not the raw key; apply the `sonar` label) → return to the default branch → (re-scan via CI or `sonar` analysis if available) → re-check with `sqa show <key>` / `sqa next`. Presentation: if the finding is in test code, accept or a Sonar exclusion may be appropriate; never edit Sonar settings without approval.
+- Acknowledged hotspots: risk confirmed, fix pending; recommend the fix, or ask about `reopen` / `safe`. Hotspot comments and assignments are visible writes and need approval of the exact text/login.
+- Coverage: when the summary shows failing coverage or the user asks, `sqa coverage` then `sqa coverage --file`; writing tests is normal code work under the fix loop (ask before branching/PRs, one PR per change, meaningful assertions, never change coverage settings or thresholds without approval).
 - How to present a recommendation and ask for approval (template), and that approval covers only the presented findings.
 - Never mark something FP/accepted just to reduce counts; justify every decision in the comment.
 
@@ -224,6 +245,7 @@ sqa/
 │   ├── sonarcli/    # pinned sonar: bundle/extract, download, resolve, invocation, output parsing
 │   │   └── bundled/ # sonar-linux-amd64 or sonar-windows-amd64.exe fetched at build time (gitignored)
 │   ├── findings/    # normalisation + ranking
+│   ├── forge/       # open fix PR lookup via gh / git ls-remote (§6.1)
 │   ├── approval/    # guardrails + audit log
 │   └── output/      # toon/json/md/table renderers
 ├── skill/SKILL.md   # embedded via go:embed
@@ -234,6 +256,7 @@ sqa/
 ├── mise.toml        # pinned Go, golangci-lint, shellcheck; tasks (build, test, lint, lint-sh, …)
 ├── mise.lock        # resolved tool versions + checksums
 ├── testdata/fake/   # fake `sonar` script + recorded API responses
+├── testdata/forge/  # fake `gh` and `git` for the open-PR lookup tests
 ├── testdata/install/  # install.sh tests and a fake GitHub Releases API
 ├── .github/         # CI, CodeQL, release, sonar-update workflows, dependabot
 └── DESIGN.md

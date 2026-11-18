@@ -158,11 +158,15 @@ uses your values. `sqa auth status` and `sqa doctor` show the token store and
 | `sqa setup [--force] [--sonar-version V]` | Optional. Extract and verify the bundled `sonar`, or download another official version (checksum-verified). |
 | `sqa doctor` | Check the token store (path, permissions), `sonar` home, the `sonar` install and version, authentication (`sonar auth status`) and server version (2025.1 or newer). |
 | `sqa auth login\|status\|logout` | Pass-through to `sonar auth …`. Run `login` yourself; agents must not. |
-| `sqa findings` | Open issues and to-review hotspots, ranked security first, with a `PR` column for findings that already have an open fix PR. Flags: `--project`, `--branch`, `--pr`, `--file`, `--new-code`, `--min-severity`, `--security-only`, `--limit` (default 50, 0 = all), `--fail-on`, `--no-pr-check`. |
+| `sqa findings` | Open issues, to-review and acknowledged hotspots, ranked security first, with a status column and a `PR` column for findings that already have an open fix PR. Ends with a quality gate summary (coverage, security hotspots reviewed). Flags: `--project`, `--branch`, `--pr`, `--file`, `--new-code`, `--min-severity`, `--security-only`, `--limit` (default 50, 0 = all), `--fail-on`, `--no-acknowledged`, `--no-pr-check`, `--no-summary`. |
 | `sqa next` | Highest-priority finding **without an open fix PR**, with the same brief as `sqa show` (same filters). `--skip <key>` (repeatable) passes over a finding; `--include-open-pr` stops skipping findings with an open PR. |
 | `sqa show <key> [--context N] [--branch B\|--pr N] [--no-pr-check]` | Agent-ready brief for an issue or hotspot, including any open fix PR. |
+| `sqa coverage [--project P] [--branch B\|--pr N] [--top N] [--overall] [--fail-on PCT]` | Files ranked by uncovered lines on new code, with coverage %, uncovered lines and conditions, and the gate's coverage condition. |
+| `sqa coverage --file <path>` | For a file: its uncovered line ranges and partly covered conditions. For a directory: the ranking below it. |
 | `sqa mark <issue-key> fp\|accept\|reopen --comment "…" --approved-by-user [--dry-run]` | Transition an issue and add a `[sqa]` comment. |
 | `sqa hotspot <key> safe\|fixed\|acknowledged --comment "…" --approved-by-user [--dry-run]` | Review a hotspot (status `REVIEWED`). |
+| `sqa hotspot <key> reopen\|comment --comment "…" --approved-by-user [--dry-run]` | Set a hotspot back to `TO_REVIEW`, or only add a comment. |
+| `sqa hotspot <key> assign <login> --comment "…" --approved-by-user [--dry-run]` | Assign a hotspot to a SonarQube user. |
 | `sqa skill print` | Print the embedded `SKILL.md`. |
 | `sqa skill install [--target agents\|claude\|opencode\|cursor\|<path>] [--project]` | Install the skill. |
 | `sqa version` | Version of `sqa`, the pinned `sonar` CLI, whether it is bundled, and which `sonar` is in use. |
@@ -174,7 +178,7 @@ token-efficient) when piped, which is what agents see.
 ### Ranking
 
 1. Vulnerabilities (MQR software quality `SECURITY`, or type `VULNERABILITY`)
-2. Security hotspots `TO_REVIEW`, by vulnerability probability HIGH > MEDIUM > LOW
+2. Security hotspots `TO_REVIEW` or reviewed as `ACKNOWLEDGED` (fix pending), by vulnerability probability HIGH > MEDIUM > LOW
 3. Reliability (`RELIABILITY` / `BUG`)
 4. Maintainability (`MAINTAINABILITY` / `CODE_SMELL`)
 
@@ -199,12 +203,61 @@ review. They ask your forge, not SonarQube, and `sqa` never handles a token:
 `pr_check` in the output says which one was used (`gh`, `git`, `unavailable`,
 `off`). `--no-pr-check` skips the lookup, e.g. for `findings --fail-on` in CI.
 
+### Coverage
+
+`sqa coverage` shows where tests are missing, using the coverage SonarQube
+imported in the last analysis (from your CI's coverage report):
+
+```text
+$ sqa coverage
+demo
+Coverage on new code: 62.5% (12 of 40 lines uncovered, 3 uncovered conditions); gate new_coverage >= 80% (failing)
+#    COVERAGE UNCOVERED CONDITIONS LINES  FILE
+1    40.0%    6         1          10     internal/api/users.go
+2    80.0%    4         2          20     internal/db/query.go
+
+$ sqa coverage --file internal/api/users.go
+demo / internal/api/users.go
+Coverage on new code: 40.0% (6 of 10 lines uncovered, 1 uncovered conditions); gate new_coverage >= 80% (failing)
+Uncovered lines: 23, 25-26
+Partly covered conditions (line covered/total): 22 (1/2), 28 (0/2)
+```
+
+- Files are ranked by uncovered lines on **new code**
+  (`/api/measures/component_tree`, sorted on the new-code period). Without a
+  new-code period, or with `--overall`, it ranks by overall uncovered lines.
+  Fully covered files are left out. `--top N` (default 20, max 500).
+- `--file <file>` reads `/api/sources/lines` and lists uncovered line ranges
+  and lines with partly covered conditions (on new code unless `--overall`).
+  If SonarQube has no line coverage for the file (no `lineHits`), it says so
+  instead of reporting it as covered.
+- `--fail-on 80` exits 1 when coverage in the reported scope is below 80%.
+- It is read-only, so no approval is needed. The skill treats writing tests
+  as normal code work: the agent proposes tests and asks before branching or
+  opening a PR.
+
+`sqa findings` ends with a short quality gate summary, e.g.
+
+```text
+Coverage on new code: 62.5% (gate requires >= 80%: failing). Run `sqa coverage` for the files that need tests.
+Security hotspots reviewed on new code: 50.0% (gate requires >= 100%: failing). Review the hotspots above with the user.
+```
+
+It comes from one `/api/qualitygates/project_status` call (plus one
+`/api/measures/component` call when the gate has no coverage condition). In
+JSON and TOON it is the `summary` field. Problems reading the gate become a
+note and never fail `findings`. `--no-summary` skips it.
+
+`sonar` 1.12 itself has no coverage command. `sonar quality-gate status
+--category coverage` lists the worst-covered files, but only for a coverage
+condition that is already failing, and it shows no line ranges.
+
 ### Exit codes
 
 | Code | Meaning |
 | --- | --- |
 | 0 | Success (or nothing at or above `--fail-on`). |
-| 1 | `findings --fail-on` matched. |
+| 1 | `findings --fail-on` matched, or `coverage --fail-on` coverage is below the percentage. |
 | 2 | Usage or configuration error (including a missing `sonar`). |
 | 3 | Authentication or server error. |
 | 4 | Approval missing (`--approved-by-user` or `--comment`). |
@@ -265,32 +318,42 @@ and `--help`):
 **What `sqa` adds:**
 
 - **Hotspots in the same queue as issues.** `sqa findings` and `sqa next` fetch
-  `TO_REVIEW` hotspots (`/api/hotspots/search`, all pages) and rank them right
-  after vulnerabilities, by review priority (vulnerability probability
-  HIGH > MEDIUM > LOW), then new code first. `--security-only` shows only
-  vulnerabilities and hotspots; `--file`, `--branch`, `--pr` and `--new-code`
-  apply to hotspots too.
+  `TO_REVIEW` hotspots and hotspots reviewed as `ACKNOWLEDGED`
+  (`/api/hotspots/search`, all pages). They rank them right after
+  vulnerabilities, by review priority (vulnerability probability
+  HIGH > MEDIUM > LOW), then new code first. The status column shows
+  `ACKNOWLEDGED`, so a confirmed risk with a pending fix stays visible until it
+  is fixed or marked safe. `--no-acknowledged` hides those. `--security-only`
+  shows only vulnerabilities and hotspots; `--file`, `--branch`, `--pr` and
+  `--new-code` apply to hotspots too.
 - **A review brief.** `sqa show <hotspot-key>` (and `sqa next`) combine
   `/api/hotspots/show`, the rule's description sections (what's the risk, how
   to assess it, how to fix it) and the flagged lines with surrounding code from
   `/api/sources/lines`. They add a link to the hotspot's page in SonarQube and
-  the possible verdicts: fix (then mark fixed), safe, acknowledged.
-- **A guarded review command.** `sqa hotspot <key> safe|fixed|acknowledged
-  --comment "…" --approved-by-user` sets `REVIEWED` with that resolution and
-  the comment (prefixed `[sqa]`) in one call. It refuses to run without the
-  approval flag and a comment, supports `--dry-run`, and logs every attempt to
-  the audit log. The skill tells agents to present each hotspot with a
-  recommendation and wait for your decision. An agent never needs `sonar api`.
+  the possible verdicts (fix then mark fixed, safe, acknowledged; reopen for a
+  reviewed hotspot).
+- **Guarded hotspot commands.** All of these refuse to run without
+  `--approved-by-user` and a `--comment` (posted with an `[sqa]` prefix),
+  support `--dry-run`, and log every attempt to the audit log:
+  - `sqa hotspot <key> safe|fixed|acknowledged`: `REVIEWED` with that
+    resolution (`/api/hotspots/change_status`).
+  - `sqa hotspot <key> reopen`: back to `TO_REVIEW` (`/api/hotspots/change_status`).
+  - `sqa hotspot <key> comment`: a comment only (`/api/hotspots/add_comment`).
+  - `sqa hotspot <key> assign <login>`: assign it (`/api/hotspots/assign`;
+    SonarQube allows this only for `TO_REVIEW` and `ACKNOWLEDGED` hotspots).
 
-**Not covered yet:**
+  The skill tells agents to present each hotspot, comment or assignment and
+  wait for your decision. An agent never needs `sonar api`.
+- **The "Security Hotspots Reviewed" gate condition.** The summary at the end
+  of `sqa findings` shows it next to coverage when your gate has it.
 
-- Only `TO_REVIEW` hotspots are listed. Once a hotspot is `ACKNOWLEDGED` (fix
-  pending) it leaves the queue, and `sqa` cannot list reviewed hotspots.
-- `sqa` cannot set a hotspot back to `TO_REVIEW`; undo a wrong review in the
-  SonarQube UI.
-- No assigning and no comment-only changes.
-- `sqa` does not show the quality gate, so it does not report the "Security
-  Hotspots Reviewed" condition. Use `sonar quality-gate status` for that.
+**Limits:**
+
+- Hotspots reviewed as `SAFE` or `FIXED` are not listed.
+- `add_comment` and `assign` are internal SonarQube endpoints (the ones the
+  web UI uses, there since 8.1 and 8.2). They are not in the public API docs
+  and could change between SonarQube versions.
+- No unassigning, and no editing or deleting comments.
 
 ## Configuration
 
