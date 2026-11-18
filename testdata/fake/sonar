@@ -51,7 +51,11 @@ case "$1" in
   api)
     method="$2"; path="$3"
     if [ "$method" = post ]; then
-      if [ -n "${FAKE_POST_FAIL:-}" ]; then echo "SonarQube API error: 403 - forbidden" >&2; exit 1; fi
+      # FAKE_POST_FAIL=1 fails every post; any other value only posts to that path.
+      case "${FAKE_POST_FAIL:-}" in
+        "") ;;
+        1|"$path") echo "SonarQube API error: 403 - forbidden" >&2; exit 1 ;;
+      esac
       exit 0
     fi
     case "$path" in

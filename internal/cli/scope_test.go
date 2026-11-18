@@ -97,3 +97,18 @@ func TestFindingsFilePathIsNormalised(t *testing.T) {
 		t.Errorf("glob with ./ prefix matched nothing: exit %d\n%s", code, out)
 	}
 }
+
+// When the transition succeeded but the comment did not, the error and the
+// audit log say the state already changed, so nobody retries the transition.
+func TestMarkReportsAppliedTransitionWhenCommentFails(t *testing.T) {
+	e := newEnv(t)
+	t.Setenv("FAKE_POST_FAIL", "/api/issues/add_comment")
+	code, _, stderr := e.run("mark", "AX-VULN", "fp", "--approved-by-user", "--comment", "fixture only")
+	if code != ExitServer || !strings.Contains(stderr, "transition falsepositive was applied") {
+		t.Errorf("exit %d: %s", code, stderr)
+	}
+	a := readAudit(t, e.home)
+	if len(a) != 1 || a[0].Result != "error" || !strings.Contains(a[0].ErrorMsg, "was applied") {
+		t.Errorf("audit: %+v", a)
+	}
+}

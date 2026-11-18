@@ -92,7 +92,11 @@ func (a *app) markCmd() *cobra.Command {
 				if err := r.TransitionIssue(cmd.Context(), key, transition); err != nil {
 					return err
 				}
-				return r.CommentIssue(cmd.Context(), key, comment)
+				if err := r.CommentIssue(cmd.Context(), key, comment); err != nil {
+					// Do not let a retry repeat the transition.
+					return fmt.Errorf("transition %s was applied, but adding the comment failed (add it in SonarQube): %w", transition, err)
+				}
+				return nil
 			})
 		},
 	}
