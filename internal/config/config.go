@@ -64,83 +64,56 @@ func Home() (string, error) {
 	return h, nil
 }
 
-func xdgWith(getenv func(string) string, env, fallback string) (string, error) {
-	if v := getenv(env); v != "" && filepath.IsAbs(v) {
-		return v, nil
-	}
-	h, err := Home()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(h, fallback), nil
-}
-
 // ConfigDir is $XDG_CONFIG_HOME/sqa (default ~/.config/sqa, or
 // %APPDATA%\sqa on Windows).
-func ConfigDir() (string, error) {
-	d, err := dirOf("config", runtime.GOOS, os.Getenv)
-	return d, err
-}
+func ConfigDir() (string, error) { return dirOf("config", runtime.GOOS, os.Getenv) }
 
 // DataDir is $XDG_DATA_HOME/sqa (default ~/.local/share/sqa, or
 // %LOCALAPPDATA%\sqa on Windows).
-func DataDir() (string, error) {
-	d, err := dirOf("data", runtime.GOOS, os.Getenv)
-	return d, err
-}
+func DataDir() (string, error) { return dirOf("data", runtime.GOOS, os.Getenv) }
 
 // StateDir is $XDG_STATE_HOME/sqa (default ~/.local/state/sqa, or
 // %LOCALAPPDATA%\sqa on Windows).
-func StateDir() (string, error) {
-	d, err := dirOf("state", runtime.GOOS, os.Getenv)
-	return d, err
+func StateDir() (string, error) { return dirOf("state", runtime.GOOS, os.Getenv) }
+
+// dirKinds lists, per directory kind, the XDG variable, the default below
+// the home directory, and the Windows variable with its fallback.
+var dirKinds = map[string]struct {
+	xdg, home, winEnv string
+	winFallback       func() (string, error)
+}{
+	"config": {"XDG_CONFIG_HOME", ".config", "APPDATA", os.UserConfigDir},
+	"data":   {"XDG_DATA_HOME", filepath.Join(".local", "share"), "LOCALAPPDATA", os.UserCacheDir},
+	"state":  {"XDG_STATE_HOME", filepath.Join(".local", "state"), "LOCALAPPDATA", os.UserCacheDir},
 }
 
 // dirOf returns the sqa config, data or state directory for goos.
 // Absolute XDG_* overrides win on every OS, including Windows.
 func dirOf(kind, goos string, getenv func(string) string) (string, error) {
-	switch kind {
-	case "config":
-		if v := getenv("XDG_CONFIG_HOME"); envAbs(goos, v) {
-			return filepath.Join(v, "sqa"), nil
-		}
-		if goos == "windows" {
-			return windowsAppDir(getenv, "APPDATA", os.UserConfigDir)
-		}
-		d, err := xdgWith(getenv, "XDG_CONFIG_HOME", ".config")
-		return filepath.Join(d, "sqa"), err
-	case "data":
-		if v := getenv("XDG_DATA_HOME"); envAbs(goos, v) {
-			return filepath.Join(v, "sqa"), nil
-		}
-		if goos == "windows" {
-			return windowsAppDir(getenv, "LOCALAPPDATA", os.UserCacheDir)
-		}
-		d, err := xdgWith(getenv, "XDG_DATA_HOME", filepath.Join(".local", "share"))
-		return filepath.Join(d, "sqa"), err
-	case "state":
-		if v := getenv("XDG_STATE_HOME"); envAbs(goos, v) {
-			return filepath.Join(v, "sqa"), nil
-		}
-		if goos == "windows" {
-			return windowsAppDir(getenv, "LOCALAPPDATA", os.UserCacheDir)
-		}
-		d, err := xdgWith(getenv, "XDG_STATE_HOME", filepath.Join(".local", "state"))
-		return filepath.Join(d, "sqa"), err
-	default:
+	k, ok := dirKinds[kind]
+	if !ok {
 		return "", fmt.Errorf("unknown dir kind %q", kind)
 	}
-}
-
-func windowsAppDir(getenv func(string) string, env string, fallback func() (string, error)) (string, error) {
-	if v := getenv(env); envAbs("windows", v) {
-		return filepath.Join(v, "sqa"), nil
+	var base string
+	switch {
+	case envAbs(goos, getenv(k.xdg)):
+		base = getenv(k.xdg)
+	case goos == "windows" && envAbs(goos, getenv(k.winEnv)):
+		base = getenv(k.winEnv)
+	case goos == "windows":
+		d, err := k.winFallback()
+		if err != nil {
+			return "", err
+		}
+		base = d
+	default:
+		h, err := Home()
+		if err != nil {
+			return "", err
+		}
+		base = filepath.Join(h, k.home)
 	}
-	d, err := fallback()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(d, "sqa"), nil
+	return filepath.Join(base, "sqa"), nil
 }
 
 func exeSuffix(goos string) string {
