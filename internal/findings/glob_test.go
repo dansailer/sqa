@@ -53,3 +53,10 @@ func TestSeverityJSONIsTheName(t *testing.T) {
 		t.Fatalf("%+v %v", f, err)
 	}
 }
+
+func TestCategoryIsTheTierLabel(t *testing.T) {
+	b, err := json.Marshal(Finding{Key: "k", Tier: TierHotspot})
+	if err != nil || !strings.Contains(string(b), `"tier":2,"category":"hotspot"`) {
+		t.Fatalf("%s %v", b, err)
+	}
+}

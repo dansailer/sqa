@@ -3,6 +3,7 @@
 package findings
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -109,10 +110,12 @@ func sev(s string) Severity {
 
 // Finding is the normalised view of an issue or hotspot.
 type Finding struct {
-	Rank     int      `json:"rank"`
-	Key      string   `json:"key"`
-	Kind     Kind     `json:"kind"`
-	Tier     Tier     `json:"tier"`
+	Rank int    `json:"rank"`
+	Key  string `json:"key"`
+	Kind Kind   `json:"kind"`
+	Tier Tier   `json:"tier"`
+	// Category is Tier.Label(), filled in by MarshalJSON only, so the two
+	// cannot disagree; read Tier.Label() in Go.
 	Category string   `json:"category"`
 	Quality  string   `json:"quality"`
 	Severity Severity `json:"severity"`
@@ -125,6 +128,13 @@ type Finding struct {
 	// PR is the open fix PR (URL) or `branch:<name>` (remote fix branch,
 	// git fallback); empty when none was found or the check was off.
 	PR string `json:"pr"`
+}
+
+// MarshalJSON writes the finding with category set from tier.
+func (f Finding) MarshalJSON() ([]byte, error) {
+	type plain Finding
+	f.Category = f.Tier.Label()
+	return json.Marshal(plain(f))
 }
 
 // qualityTier orders MQR software qualities.
@@ -177,7 +187,6 @@ func FromIssue(i sonarcli.Issue, comps []sonarcli.Component, newCode bool) Findi
 		}
 		f.Severity = sev(i.Severity)
 	}
-	f.Category = f.Tier.Label()
 	return f
 }
 
@@ -195,7 +204,6 @@ func FromHotspot(h sonarcli.Hotspot, comps []sonarcli.Component, newCode bool) F
 	if f.Line == 0 && h.TextRange != nil {
 		f.Line = h.TextRange.StartLine
 	}
-	f.Category = f.Tier.Label()
 	return f
 }
 
