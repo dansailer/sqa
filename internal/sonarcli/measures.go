@@ -2,8 +2,6 @@ package sonarcli
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
@@ -92,15 +90,11 @@ func (r *Runner) ComponentMeasures(ctx context.Context, component string, metric
 	q.Set("metricKeys", strings.Join(metrics, ","))
 	setIf(q, "branch", branch)
 	setIf(q, "pullRequest", pr)
-	out, err := r.APIGet(ctx, "/api/measures/component", q)
-	if err != nil {
-		return MeasuredComponent{}, err
-	}
 	var resp struct {
 		Component rawComponent `json:"component"`
 	}
-	if err := json.Unmarshal(out, &resp); err != nil {
-		return MeasuredComponent{}, fmt.Errorf("parse /api/measures/component: %w", err)
+	if err := r.getJSON(ctx, "/api/measures/component", q, &resp); err != nil {
+		return MeasuredComponent{}, err
 	}
 	return resp.Component.parse(), nil
 }
@@ -142,18 +136,14 @@ func (r *Runner) ComponentTree(ctx context.Context, o ComponentTreeOptions) ([]M
 		ps = 500
 	}
 	q.Set("ps", strconv.Itoa(ps))
-	out, err := r.APIGet(ctx, "/api/measures/component_tree", q)
-	if err != nil {
-		return nil, 0, err
-	}
 	var resp struct {
 		Paging struct {
 			Total int `json:"total"`
 		} `json:"paging"`
 		Components []rawComponent `json:"components"`
 	}
-	if err := json.Unmarshal(out, &resp); err != nil {
-		return nil, 0, fmt.Errorf("parse /api/measures/component_tree: %w", err)
+	if err := r.getJSON(ctx, "/api/measures/component_tree", q, &resp); err != nil {
+		return nil, 0, err
 	}
 	cs := make([]MeasuredComponent, 0, len(resp.Components))
 	for _, rc := range resp.Components {
@@ -183,15 +173,11 @@ func (r *Runner) ProjectStatus(ctx context.Context, project, branch, pr string) 
 	q.Set("projectKey", project)
 	setIf(q, "branch", branch)
 	setIf(q, "pullRequest", pr)
-	out, err := r.APIGet(ctx, "/api/qualitygates/project_status", q)
-	if err != nil {
-		return GateStatus{}, err
-	}
 	var resp struct {
 		ProjectStatus GateStatus `json:"projectStatus"`
 	}
-	if err := json.Unmarshal(out, &resp); err != nil {
-		return GateStatus{}, fmt.Errorf("parse /api/qualitygates/project_status: %w", err)
+	if err := r.getJSON(ctx, "/api/qualitygates/project_status", q, &resp); err != nil {
+		return GateStatus{}, err
 	}
 	return resp.ProjectStatus, nil
 }

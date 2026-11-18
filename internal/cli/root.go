@@ -106,7 +106,7 @@ func exitCode(err error) int {
 	var se *sonarcli.Error
 	if errors.As(err, &se) {
 		switch se.Kind {
-		case sonarcli.KindUsage, sonarcli.KindNotFound:
+		case sonarcli.KindUsage, sonarcli.KindNotStarted:
 			return ExitUsage
 		default:
 			return ExitServer

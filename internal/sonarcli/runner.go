@@ -28,8 +28,8 @@ const (
 	KindServer ErrorKind = iota
 	// KindUsage means sonar rejected the arguments (sonar exit code 2).
 	KindUsage
-	// KindNotFound means the sonar binary could not be started.
-	KindNotFound
+	// KindNotStarted means the sonar binary could not be started.
+	KindNotStarted
 )
 
 // Error is returned when sonar exits non-zero or cannot be started.
@@ -146,18 +146,21 @@ func (r *Runner) Run(ctx context.Context, args ...string) (stdout, stderr []byte
 	if runErr == nil {
 		return out.Bytes(), errb.Bytes(), secErr
 	}
-	e := &Error{Command: commandName(args), Stderr: errb.String(), Err: runErr, ExitCode: -1}
+	return out.Bytes(), errb.Bytes(), runError(args, errb.String(), runErr)
+}
+
+// runError classifies a failed sonar run: exit 2 is a usage error, a
+// process that never started is KindNotStarted, anything else KindServer.
+func runError(args []string, stderr string, err error) *Error {
+	e := &Error{Command: commandName(args), Stderr: stderr, Err: err, ExitCode: -1, Kind: KindNotStarted}
 	var exitErr *exec.ExitError
-	switch {
-	case errors.As(runErr, &exitErr):
-		e.ExitCode = exitErr.ExitCode()
+	if errors.As(err, &exitErr) {
+		e.ExitCode, e.Kind = exitErr.ExitCode(), KindServer
 		if e.ExitCode == 2 {
 			e.Kind = KindUsage
 		}
-	default:
-		e.Kind = KindNotFound
 	}
-	return out.Bytes(), errb.Bytes(), e
+	return e
 }
 
 // Interactive runs sonar attached to the user's terminal (used for the
@@ -170,19 +173,8 @@ func (r *Runner) Interactive(ctx context.Context, stdin io.Reader, stdout, stder
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
 	runErr := cmd.Run()
 	secErr := r.secure()
-	if err := runErr; err != nil {
-		e := &Error{Command: commandName(args), Err: err, ExitCode: -1}
-		var exitErr *exec.ExitError
-		switch {
-		case errors.As(err, &exitErr):
-			e.ExitCode = exitErr.ExitCode()
-			if e.ExitCode == 2 {
-				e.Kind = KindUsage
-			}
-		default:
-			e.Kind = KindNotFound
-		}
-		return e
+	if runErr != nil {
+		return runError(args, "", runErr)
 	}
 	return secErr
 }

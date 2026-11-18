@@ -48,21 +48,33 @@ func (r *Runner) AuthStatus(ctx context.Context) (AuthStatus, error) {
 	return st, fmt.Errorf("unexpected output from sonar auth status: %q", truncate(string(out), 200))
 }
 
-// APIGet runs `sonar api get <path>` and returns the response body.
-func (r *Runner) APIGet(ctx context.Context, path string, query url.Values) ([]byte, error) {
+// apiGet runs `sonar api get <path>` and returns the response body.
+func (r *Runner) apiGet(ctx context.Context, path string, query url.Values) ([]byte, error) {
 	out, _, err := r.Run(ctx, "api", "get", withQuery(path, query))
 	return out, err
 }
 
-// APIPost runs `sonar api post <path> --data <json>`. sonar sends the JSON
-// object as form data for /api/ (v1) endpoints.
-func (r *Runner) APIPost(ctx context.Context, path string, data map[string]string) ([]byte, error) {
+// getJSON runs `sonar api get` and decodes the JSON body into v.
+func (r *Runner) getJSON(ctx context.Context, path string, q url.Values, v any) error {
+	out, err := r.apiGet(ctx, path, q)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(out, v); err != nil {
+		return fmt.Errorf("parse %s: %w", path, err)
+	}
+	return nil
+}
+
+// post runs `sonar api post <path> --data <json>` and drops the body. sonar
+// sends the JSON object as form data for /api/ (v1) endpoints.
+func (r *Runner) post(ctx context.Context, path string, data map[string]string) error {
 	b, err := json.Marshal(data)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	out, _, err := r.Run(ctx, "api", "post", path, "--data", string(b))
-	return out, err
+	_, _, err = r.Run(ctx, "api", "post", path, "--data", string(b))
+	return err
 }
 
 func withQuery(path string, q url.Values) string {
@@ -213,13 +225,9 @@ func (r *Runner) SearchHotspots(ctx context.Context, o SearchHotspotsOptions, li
 		}
 		q.Set("ps", "500")
 		q.Set("p", strconv.Itoa(page))
-		out, err := r.APIGet(ctx, "/api/hotspots/search", q)
-		if err != nil {
-			return nil, nil, err
-		}
 		var resp HotspotsSearchResponse
-		if err := json.Unmarshal(out, &resp); err != nil {
-			return nil, nil, fmt.Errorf("parse /api/hotspots/search: %w", err)
+		if err := r.getJSON(ctx, "/api/hotspots/search", q, &resp); err != nil {
+			return nil, nil, err
 		}
 		hs = append(hs, resp.Hotspots...)
 		comps = append(comps, resp.Components...)
@@ -239,13 +247,9 @@ func (r *Runner) GetIssue(ctx context.Context, key, branch, pr string) (*Issue, 
 	q.Set("additionalFields", "_all")
 	setIf(q, "branch", branch)
 	setIf(q, "pullRequest", pr)
-	out, err := r.APIGet(ctx, "/api/issues/search", q)
-	if err != nil {
-		return nil, nil, err
-	}
 	var resp IssuesSearchResponse
-	if err := json.Unmarshal(out, &resp); err != nil {
-		return nil, nil, fmt.Errorf("parse /api/issues/search: %w", err)
+	if err := r.getJSON(ctx, "/api/issues/search", q, &resp); err != nil {
+		return nil, nil, err
 	}
 	for i := range resp.Issues {
 		if resp.Issues[i].Key == key {
@@ -260,13 +264,9 @@ func (r *Runner) GetIssue(ctx context.Context, key, branch, pr string) (*Issue, 
 func (r *Runner) ShowHotspot(ctx context.Context, key string) (*HotspotDetail, error) {
 	q := url.Values{}
 	q.Set("hotspot", key)
-	out, err := r.APIGet(ctx, "/api/hotspots/show", q)
-	if err != nil {
-		return nil, err
-	}
 	var h HotspotDetail
-	if err := json.Unmarshal(out, &h); err != nil {
-		return nil, fmt.Errorf("parse /api/hotspots/show: %w", err)
+	if err := r.getJSON(ctx, "/api/hotspots/show", q, &h); err != nil {
+		return nil, err
 	}
 	return &h, nil
 }
@@ -275,15 +275,11 @@ func (r *Runner) ShowHotspot(ctx context.Context, key string) (*HotspotDetail, e
 func (r *Runner) ShowRule(ctx context.Context, key string) (*Rule, error) {
 	q := url.Values{}
 	q.Set("key", key)
-	out, err := r.APIGet(ctx, "/api/rules/show", q)
-	if err != nil {
-		return nil, err
-	}
 	var resp struct {
 		Rule Rule `json:"rule"`
 	}
-	if err := json.Unmarshal(out, &resp); err != nil {
-		return nil, fmt.Errorf("parse /api/rules/show: %w", err)
+	if err := r.getJSON(ctx, "/api/rules/show", q, &resp); err != nil {
+		return nil, err
 	}
 	return &resp.Rule, nil
 }
@@ -301,15 +297,11 @@ func (r *Runner) SourceLines(ctx context.Context, component string, from, to int
 	}
 	setIf(q, "branch", branch)
 	setIf(q, "pullRequest", pr)
-	out, err := r.APIGet(ctx, "/api/sources/lines", q)
-	if err != nil {
-		return nil, err
-	}
 	var resp struct {
 		Sources []SourceLine `json:"sources"`
 	}
-	if err := json.Unmarshal(out, &resp); err != nil {
-		return nil, fmt.Errorf("parse /api/sources/lines: %w", err)
+	if err := r.getJSON(ctx, "/api/sources/lines", q, &resp); err != nil {
+		return nil, err
 	}
 	sort.Slice(resp.Sources, func(i, j int) bool { return resp.Sources[i].Line < resp.Sources[j].Line })
 	return resp.Sources, nil
@@ -317,7 +309,7 @@ func (r *Runner) SourceLines(ctx context.Context, component string, from, to int
 
 // ServerVersion calls /api/server/version (plain-text body).
 func (r *Runner) ServerVersion(ctx context.Context) (string, error) {
-	out, err := r.APIGet(ctx, "/api/server/version", nil)
+	out, err := r.apiGet(ctx, "/api/server/version", nil)
 	if err != nil {
 		return "", err
 	}
@@ -326,22 +318,19 @@ func (r *Runner) ServerVersion(ctx context.Context) (string, error) {
 
 // TransitionIssue calls /api/issues/do_transition.
 func (r *Runner) TransitionIssue(ctx context.Context, key, transition string) error {
-	_, err := r.APIPost(ctx, "/api/issues/do_transition", map[string]string{"issue": key, "transition": transition})
-	return err
+	return r.post(ctx, "/api/issues/do_transition", map[string]string{"issue": key, "transition": transition})
 }
 
 // CommentIssue calls /api/issues/add_comment.
 func (r *Runner) CommentIssue(ctx context.Context, key, text string) error {
-	_, err := r.APIPost(ctx, "/api/issues/add_comment", map[string]string{"issue": key, "text": text})
-	return err
+	return r.post(ctx, "/api/issues/add_comment", map[string]string{"issue": key, "text": text})
 }
 
 // ReviewHotspot calls /api/hotspots/change_status with status REVIEWED.
 func (r *Runner) ReviewHotspot(ctx context.Context, key, resolution, comment string) error {
-	_, err := r.APIPost(ctx, "/api/hotspots/change_status", map[string]string{
+	return r.post(ctx, "/api/hotspots/change_status", map[string]string{
 		"hotspot": key, "status": "REVIEWED", "resolution": resolution, "comment": comment,
 	})
-	return err
 }
 
 func setIf(q url.Values, k, v string) {
@@ -360,23 +349,20 @@ func truncate(s string, n int) string {
 // ReopenHotspot calls /api/hotspots/change_status with status TO_REVIEW (a
 // resolution is not allowed then).
 func (r *Runner) ReopenHotspot(ctx context.Context, key, comment string) error {
-	_, err := r.APIPost(ctx, "/api/hotspots/change_status", map[string]string{
+	return r.post(ctx, "/api/hotspots/change_status", map[string]string{
 		"hotspot": key, "status": "TO_REVIEW", "comment": comment,
 	})
-	return err
 }
 
 // CommentHotspot calls /api/hotspots/add_comment (an internal endpoint the
 // SonarQube UI uses, available since 8.1).
 func (r *Runner) CommentHotspot(ctx context.Context, key, comment string) error {
-	_, err := r.APIPost(ctx, "/api/hotspots/add_comment", map[string]string{"hotspot": key, "comment": comment})
-	return err
+	return r.post(ctx, "/api/hotspots/add_comment", map[string]string{"hotspot": key, "comment": comment})
 }
 
 // AssignHotspot calls /api/hotspots/assign (an internal endpoint the
 // SonarQube UI uses, available since 8.2). The server only allows it on
 // TO_REVIEW or ACKNOWLEDGED hotspots.
 func (r *Runner) AssignHotspot(ctx context.Context, key, assignee, comment string) error {
-	_, err := r.APIPost(ctx, "/api/hotspots/assign", map[string]string{"hotspot": key, "assignee": assignee, "comment": comment})
-	return err
+	return r.post(ctx, "/api/hotspots/assign", map[string]string{"hotspot": key, "assignee": assignee, "comment": comment})
 }
