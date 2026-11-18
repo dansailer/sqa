@@ -3,6 +3,7 @@ package forge
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -92,5 +93,20 @@ func TestBadGHOutputFallsBack(t *testing.T) {
 	ix := detect(context.Background(), "", fakeRunner("not json", "", nil, nil, &calls))
 	if ix.Source != SourceGit || !strings.Contains(ix.Note, "unexpected output") {
 		t.Fatalf("index: %+v", ix)
+	}
+}
+
+func TestOneBodyListingSeveralKeysMatchesEach(t *testing.T) {
+	var calls []call
+	body := "### Resolves SonarQube findings\n\n- [a](https://sq/project/issues?id=demo&issues=AZa-1&open=AZa-1) (key `AZa-1`)\n- [b](https://sq/security_hotspots?id=demo&hotspots=AZb_2) (key `AZb_2`)\n"
+	js := `[{"number":7,"url":"https://github.com/acme/demo/pull/7","headRefName":"sonar/exclude-fixtures","body":` + strconv.Quote(body) + `}]`
+	ix := detect(context.Background(), "", fakeRunner(js, "", nil, nil, &calls))
+	for _, k := range []string{"AZa-1", "AZb_2"} {
+		if p, ok := ix.Lookup(k); !ok || p.Number != 7 {
+			t.Errorf("%s: %+v %v", k, p, ok)
+		}
+	}
+	if _, ok := ix.Lookup("AZa"); ok {
+		t.Error("prefix must not match")
 	}
 }
