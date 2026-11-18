@@ -7,7 +7,7 @@
 #
 # Environment:
 #   SQA_VERSION, SQA_INSTALL_DIR (default ~/.local/bin), SQA_NO_SKILL=1
-#   GITHUB_TOKEN or GH_TOKEN — for a private repository
+#   GITHUB_TOKEN or GH_TOKEN — optional, avoids the anonymous GitHub API rate limit
 #   SQA_DOWNLOAD_BASE, SQA_GITHUB_API — test hooks (see testdata/install)
 
 set -eu
@@ -30,8 +30,10 @@ Options:
   -h, --help      Show this help.
 
 Installs to $SQA_INSTALL_DIR (default ~/.local/bin) and verifies the
-archive against checksums.txt. While the repository is private, set
-GITHUB_TOKEN or GH_TOKEN, or authenticate with gh(1).
+archive against checksums.txt. No GitHub login is needed. Optionally set
+GITHUB_TOKEN or GH_TOKEN, or authenticate with gh(1), to avoid GitHub's
+anonymous API rate limit (60 requests/hour per IP) when looking up the
+latest release; pinning --version avoids that lookup.
 EOF
 }
 
@@ -218,7 +220,7 @@ resolve_tag() {
 	release_json="$tmpdir/release.json"
 	download "${GITHUB_API}/repos/${REPO}/releases/latest" "$release_json"
 	tag=$(tag_from_release_json "$release_json")
-	[ -n "$tag" ] || die "could not determine the latest release (the repository may be private: set GITHUB_TOKEN or authenticate with gh)"
+	[ -n "$tag" ] || die "could not determine the latest release (GitHub API rate limit? pass --version, or set GITHUB_TOKEN or authenticate with gh)"
 	printf '%s' "$tag"
 }
 

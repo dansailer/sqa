@@ -83,10 +83,11 @@ Installs to `$env:SQA_INSTALL_DIR` (default `%LOCALAPPDATA%\Programs\sqa`),
 verifies the archive against `checksums.txt`, and runs `sqa skill install`
 (skip with `$env:SQA_NO_SKILL = '1'`).
 
-mise also works on Windows. While the repository is private, every method
-needs a GitHub token to see the releases: `export GITHUB_TOKEN=$(gh auth token)`
-(or `$env:GITHUB_TOKEN = (gh auth token)`), or an authenticated `gh`; mise
-also accepts `MISE_GITHUB_TOKEN`.
+mise also works on Windows. No GitHub login is needed for any method. Looking
+up the latest release uses GitHub's API, which allows 60 anonymous requests per
+hour per IP; if you hit that limit (shared CI runners, for example), pin a
+version or set `GITHUB_TOKEN` (`export GITHUB_TOKEN=$(gh auth token)`, or
+`$env:GITHUB_TOKEN = (gh auth token)`); mise also accepts `MISE_GITHUB_TOKEN`.
 
 ### Which `sonar` is used
 
@@ -396,9 +397,10 @@ skills:
   the checksum is fetched from SonarSource's published `.sha256` file.
 - `sqa` refuses to run `sonar integrate` (installs MCP servers and hooks) and
   `sonar remediate`.
-- Release archives come with `checksums.txt`, an SPDX SBOM, plus GitHub build
-  provenance attestations once the repository is public. Workflows use SHA-pinned actions, least-privilege
-  tokens and `step-security/harden-runner`.
+- Release archives come with `checksums.txt`, an SPDX SBOM and GitHub build
+  provenance attestations (`gh attestation verify <archive> --repo dansailer/sqa`).
+  Workflows use SHA-pinned actions, least-privilege tokens and
+  `step-security/harden-runner`.
 
 ## Development
 

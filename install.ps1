@@ -6,7 +6,7 @@
 #
 # Environment:
 #   SQA_VERSION, SQA_INSTALL_DIR (default %LOCALAPPDATA%\Programs\sqa), SQA_NO_SKILL=1
-#   GITHUB_TOKEN or GH_TOKEN — for a private repository
+#   GITHUB_TOKEN or GH_TOKEN — optional, avoids the anonymous GitHub API rate limit
 #   SQA_DOWNLOAD_BASE, SQA_GITHUB_API — test hooks
 
 #Requires -Version 5.1
@@ -34,8 +34,10 @@ Usage:
   .\install.ps1 -Version v0.3.0 [-NoSkill]
 
 Installs to $env:SQA_INSTALL_DIR (default %LOCALAPPDATA%\Programs\sqa) and
-verifies the archive against checksums.txt. While the repository is private,
-set GITHUB_TOKEN or GH_TOKEN, or authenticate with gh.
+verifies the archive against checksums.txt. No GitHub login is needed.
+Optionally set GITHUB_TOKEN or GH_TOKEN, or authenticate with gh, to avoid
+GitHub's anonymous API rate limit (60 requests/hour per IP) when looking up
+the latest release; pinning -Version avoids that lookup.
 
 Skip skill install with -NoSkill or SQA_NO_SKILL=1.
 '@ | Write-Host
@@ -133,7 +135,7 @@ function Get-LatestTag {
     Invoke-Download -Uri "$GitHubApi/repos/$Repo/releases/latest" -OutFile $jsonPath
     $rel = Get-Content -LiteralPath $jsonPath -Raw | ConvertFrom-Json
     if (-not $rel.tag_name) {
-        Die 'could not determine the latest release (the repository may be private: set GITHUB_TOKEN or authenticate with gh)'
+        Die 'could not determine the latest release (GitHub API rate limit? pass -Version, or set GITHUB_TOKEN or authenticate with gh)'
     }
     return [string]$rel.tag_name
 }
