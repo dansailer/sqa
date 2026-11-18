@@ -231,22 +231,28 @@ func TestFindingsGateSummary(t *testing.T) {
 		t.Errorf("want exactly one gate call and no measures call: %v", e.calls())
 	}
 
+	if len(s.NextSteps) != 2 || !strings.Contains(s.NextSteps[0], "sqa coverage") || !strings.Contains(s.NextSteps[1], "hotspots") {
+		t.Errorf("next steps: %q", s.NextSteps)
+	}
+	// The summary comes first in every format, so an agent cannot miss it.
+	if !strings.HasPrefix(out, "{\n  \"summary\": {") {
+		t.Errorf("json: summary is not the first field:\n%.200s", out)
+	}
 	code, out, _ = e.run("findings", "--format", "table", "--no-pr-check")
-	for _, must := range []string{
-		"Coverage on new code: 62.5% (gate requires >= 80%: failing). Run `sqa coverage` for the files that need tests.",
-		"Security hotspots reviewed on new code: 50.0% (gate requires >= 100%: failing).",
-	} {
-		if code != 0 || !strings.Contains(out, must) {
-			t.Errorf("table missing %q:\n%s", must, out)
-		}
+	gate := strings.Index(out, "Coverage on new code: 62.5% (gate requires >= 80%: failing)")
+	step := strings.Index(out, "Next step: Coverage is below the quality gate")
+	header := strings.Index(out, "CATEGORY")
+	if code != 0 || gate < 0 || step < 0 || header < 0 || gate > header || step > header ||
+		!strings.Contains(out, "Security hotspots reviewed on new code: 50.0% (gate requires >= 100%: failing)") {
+		t.Errorf("table: gate summary must precede the findings:\n%s", out)
 	}
 	code, out, _ = e.run("findings", "--format", "md", "--no-pr-check")
-	if code != 0 || !strings.Contains(out, "Run `sqa coverage`") {
+	if q, tbl := strings.Index(out, "### Quality gate"), strings.Index(out, "| # |"); code != 0 || q < 0 || tbl < 0 || q > tbl || !strings.Contains(out, "`sqa coverage`") {
 		t.Errorf("md:\n%s", out)
 	}
 	code, out, _ = e.run("findings", "--no-pr-check")
-	if code != 0 || !strings.Contains(out, "summary:") || !strings.Contains(out, "hotspots_reviewed:") {
-		t.Errorf("toon:\n%s", out)
+	if code != 0 || !strings.HasPrefix(out, "summary:") || !strings.Contains(out, "hotspots_reviewed:") || !strings.Contains(out, "next_steps[2]") {
+		t.Errorf("toon:\n%.400s", out)
 	}
 
 	e2 := newEnv(t)
@@ -254,10 +260,45 @@ func TestFindingsGateSummary(t *testing.T) {
 	if code != 0 || strings.Contains(out, `"summary"`) || len(e2.callsMatching("api get /api/qualitygates")) != 0 {
 		t.Errorf("--no-summary: %s %v", out, e2.calls())
 	}
-	// next carries no summary and makes no gate call.
+	// next with --no-summary makes no gate call.
 	e3 := newEnv(t)
-	if code, _, _ := e3.run("next", "--format", "json", "--no-pr-check"); code != 0 || len(e3.callsMatching("api get /api/qualitygates")) != 0 {
-		t.Errorf("next made a gate call: %v", e3.calls())
+	if code, _, _ := e3.run("next", "--format", "json", "--no-pr-check", "--no-summary"); code != 0 || len(e3.callsMatching("api get /api/qualitygates")) != 0 {
+		t.Errorf("next --no-summary made a gate call: %v", e3.calls())
+	}
+}
+
+// sqa next carries the gate first and repeats a failing condition in its
+// hint, both with a finding and when the queue is empty.
+func TestNextMentionsFailingGate(t *testing.T) {
+	e := newEnv(t)
+	code, out, stderr := e.run("next", "--format", "json", "--no-pr-check")
+	if code != 0 {
+		t.Fatalf("exit %d %s", code, stderr)
+	}
+	if !strings.HasPrefix(out, "{\n  \"gate\": {") {
+		t.Errorf("gate is not the first field:\n%.200s", out)
+	}
+	var n NextResult
+	if err := json.Unmarshal([]byte(out), &n); err != nil {
+		t.Fatal(err)
+	}
+	if n.Finding == nil || !strings.Contains(n.Hint, "Also: Coverage is below the quality gate") {
+		t.Errorf("hint: %q", n.Hint)
+	}
+	n = runNext(t, e, "--no-pr-check", "--skip", "AX-VULN,AX-VULN-OLD,HS-1,HS-2,AX-BUG,AX-SMELL")
+	if n.Finding != nil || !strings.HasPrefix(n.Hint, "No open findings left, but the quality gate is failing.") || !strings.Contains(n.Hint, "sqa coverage") {
+		t.Errorf("empty queue hint: %q", n.Hint)
+	}
+	code, out, _ = e.run("next", "--format", "table", "--no-pr-check", "--skip", "AX-VULN,AX-VULN-OLD,HS-1,HS-2,AX-BUG,AX-SMELL")
+	if code != 0 || !strings.HasPrefix(out, "Quality gate: ERROR") || !strings.Contains(out, "No open findings left, but the quality gate is failing") {
+		t.Errorf("table:\n%s", out)
+	}
+	// A passing gate adds nothing.
+	e2 := newEnv(t)
+	t.Setenv("FAKE_GATE", "nocov")
+	n = runNext(t, e2, "--no-pr-check")
+	if strings.Contains(n.Hint, "quality gate") {
+		t.Errorf("hint mentions a gate that is not failing on coverage/hotspots: %q", n.Hint)
 	}
 }
 

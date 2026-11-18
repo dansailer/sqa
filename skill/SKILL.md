@@ -13,6 +13,12 @@ approves, fixes the code or records a triage decision in SonarQube.
 
 Run `sqa doctor` first. If it fails, stop and relay its fix to the user.
 
+**Always read the quality gate read-out and report it to the user.** It is
+the first thing `sqa findings` (`summary`) and `sqa next` (`gate`) print:
+gate status, coverage and security hotspots reviewed against the gate, and
+`next_steps` when a condition fails. Tell the user about every failing
+condition, even when the finding queue is empty, and follow its next step.
+
 ## Hard rules
 
 - **No MCP.** Never use, install, configure or call any SonarQube MCP server,
@@ -79,10 +85,12 @@ If `sqa findings` cannot determine the project, ask the user for the project
 key and pass `--project <key>`.
 
 **Scope:** without `--branch`/`--pr`, every command reads the project's
-**main branch** in SonarQube, never a branch or PR guessed from the local git
-checkout. That is what the fix loop needs, since fixes branch from the default
-branch. Use `--branch`/`--pr` only when the user asks about a specific
-analysed branch or pull request.
+**main branch** in SonarQube, whichever branch you have checked out: sqa never
+derives a branch or PR from the local git checkout (plain `sonar list issues`
+would). That is what the fix loop needs, since fixes branch from the default
+branch, so you can stay on a fix branch and still see the main-branch queue.
+Use `--branch`/`--pr` only when the user asks about a specific analysed branch
+or pull request.
 
 Add `--dry-run` to preview a state change. Output defaults to the compact
 TOON format when piped; add `--format json` if you need JSON.
@@ -212,8 +220,9 @@ removes every finding it covers, not just the one you were looking at:
 
 ## Coverage
 
-`sqa findings` ends with a coverage line. When coverage on new code fails the
-gate, or the user asks about coverage:
+The gate read-out at the top of `sqa findings` and `sqa next` includes
+coverage. When coverage on new code fails the gate (`next_steps` says so), or
+the user asks about coverage:
 
 1. Run `sqa coverage` and present the files with the most uncovered lines on
    new code. For a file the user picks, run `sqa coverage --file <file>` to see

@@ -159,7 +159,7 @@ uses your values. `sqa auth status` and `sqa doctor` show the token store and
 | `sqa setup [--force] [--sonar-version V]` | Optional. Extract and verify the bundled `sonar`, or download another official version (checksum-verified). |
 | `sqa doctor` | Check the token store (path, permissions), `sonar` home, the `sonar` install and version, authentication (`sonar auth status`) and server version (2025.1 or newer). |
 | `sqa auth login\|status\|logout` | Pass-through to `sonar auth …`. Run `login` yourself; agents must not. |
-| `sqa findings` | Open issues, to-review and acknowledged hotspots, ranked security first, with a status column and a `PR` column for findings that already have an open fix PR. Ends with a quality gate summary (coverage, security hotspots reviewed). Flags: `--project`, `--branch`, `--pr`, `--file`, `--new-code`, `--min-severity`, `--security-only`, `--limit` (default 50, 0 = all), `--fail-on`, `--no-acknowledged`, `--no-pr-check`, `--no-summary`. |
+| `sqa findings` | Open issues, to-review and acknowledged hotspots, ranked security first, with a status column and a `PR` column for findings that already have an open fix PR. Starts with a quality gate summary (coverage, security hotspots reviewed). Flags: `--project`, `--branch`, `--pr`, `--file`, `--new-code`, `--min-severity`, `--security-only`, `--limit` (default 50, 0 = all), `--fail-on`, `--no-acknowledged`, `--no-pr-check`, `--no-summary`. |
 | `sqa next` | Highest-priority finding **without an open fix PR**, with the same brief as `sqa show` (same filters). `--skip <key>` (repeatable) passes over a finding; `--include-open-pr` stops skipping findings with an open PR. |
 | `sqa show <key> [--context N] [--branch B\|--pr N] [--no-pr-check]` | Agent-ready brief for an issue or hotspot, including any open fix PR. |
 | `sqa coverage [--project P] [--branch B\|--pr N] [--top N] [--overall] [--fail-on PCT]` | Files ranked by uncovered lines on new code, with coverage %, uncovered lines and conditions, and the gate's coverage condition. |
@@ -284,17 +284,24 @@ Partly covered conditions (line covered/total): 22 (1/2), 28 (0/2)
   as normal code work: the agent proposes tests and asks before branching or
   opening a PR.
 
-`sqa findings` ends with a short quality gate summary, e.g.
+`sqa findings` and `sqa next` start with a short quality gate read-out, so an
+agent cannot miss it, e.g.
 
 ```text
-Coverage on new code: 62.5% (gate requires >= 80%: failing). Run `sqa coverage` for the files that need tests.
-Security hotspots reviewed on new code: 50.0% (gate requires >= 100%: failing). Review the hotspots above with the user.
+Quality gate: ERROR
+Coverage on new code: 62.5% (gate requires >= 80%: failing)
+Security hotspots reviewed on new code: 50.0% (gate requires >= 100%: failing)
+Next step: Coverage is below the quality gate: tell the user and offer `sqa coverage` to find the files that need tests.
+Next step: Security hotspots reviewed is below the quality gate: tell the user; the hotspots in the queue need a review the user approves.
 ```
 
 It comes from one `/api/qualitygates/project_status` call (plus one
 `/api/measures/component` call when the gate has no coverage condition). In
-JSON and TOON it is the `summary` field. Problems reading the gate become a
-note and never fail `findings`. `--no-summary` skips it.
+JSON and TOON it is the first field (`summary` for `findings`, `gate` for
+`next`), with `next_steps` when a condition fails; `sqa next` also repeats
+those steps in its `hint`, including when no finding is left. Problems
+reading the gate become a note and never fail the command. `--no-summary`
+skips it.
 
 `sonar` 1.12 itself has no coverage command. `sonar quality-gate status
 --category coverage` lists the worst-covered files, but only for a coverage
@@ -392,8 +399,8 @@ and `--help`):
 
   The skill tells agents to present each hotspot, comment or assignment and
   wait for your decision. An agent never needs `sonar api`.
-- **The "Security Hotspots Reviewed" gate condition.** The summary at the end
-  of `sqa findings` shows it next to coverage when your gate has it.
+- **The "Security Hotspots Reviewed" gate condition.** The gate read-out at the
+  top of `sqa findings` and `sqa next` shows it next to coverage when your gate has it.
 
 **Limits:**
 

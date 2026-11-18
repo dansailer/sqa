@@ -21,6 +21,27 @@ type GateSummary struct {
 	Coverage         *GateCheck `json:"coverage,omitempty"`
 	HotspotsReviewed *GateCheck `json:"hotspots_reviewed,omitempty"`
 	Note             string     `json:"note,omitempty"`
+	// NextSteps says what to tell the user when the gate is failing.
+	NextSteps []string `json:"next_steps,omitempty"`
+}
+
+func failing(c *GateCheck) bool {
+	return c != nil && c.Comparator != "" && c.Status != "" && c.Status != "OK"
+}
+
+// nextSteps lists what an agent must tell the user about a failing gate.
+func (s GateSummary) nextSteps() []string {
+	var out []string
+	if failing(s.Coverage) {
+		out = append(out, "Coverage is below the quality gate: tell the user and offer `sqa coverage` to find the files that need tests.")
+	}
+	if failing(s.HotspotsReviewed) {
+		out = append(out, "Security hotspots reviewed is below the quality gate: tell the user; the hotspots in the queue need a review the user approves.")
+	}
+	if len(out) == 0 && s.Status == "ERROR" {
+		out = append(out, "The quality gate is failing on other conditions: tell the user and check the project in SonarQube.")
+	}
+	return out
 }
 
 func metricLabel(metric string) string {
@@ -56,20 +77,33 @@ func (g GateCheck) line() string {
 // Lines renders the summary as text lines.
 func (s GateSummary) Lines() []string {
 	var out []string
-	if s.Coverage != nil {
-		out = append(out, s.Coverage.line()+". Run `sqa coverage` for the files that need tests.")
+	if s.Status != "" {
+		out = append(out, "Quality gate: "+s.Status)
 	}
-	if s.HotspotsReviewed != nil {
-		l := s.HotspotsReviewed.line() + "."
-		if s.HotspotsReviewed.Status != "" && s.HotspotsReviewed.Status != "OK" {
-			l += " Review the hotspots above with the user."
+	for _, c := range []*GateCheck{s.Coverage, s.HotspotsReviewed} {
+		if c != nil {
+			out = append(out, c.line())
 		}
-		out = append(out, l)
 	}
 	if s.Note != "" {
 		out = append(out, "Note: "+s.Note)
 	}
+	for _, n := range s.NextSteps {
+		out = append(out, "Next step: "+n)
+	}
 	return out
+}
+
+// text renders the summary with each line prefixed.
+func (s *GateSummary) text(prefix string) string {
+	if s == nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, l := range s.Lines() {
+		b.WriteString(prefix + l + "\n")
+	}
+	return b.String()
 }
 
 // gateSummary reads the quality gate once (/api/qualitygates/project_status).
@@ -99,6 +133,7 @@ func gateSummary(ctx context.Context, r *sonarcli.Runner, project, branch, pr st
 			s.Coverage = &GateCheck{Metric: sonarcli.MetricCoverage, Actual: fmtFloat(m.Measures[sonarcli.MetricCoverage])}
 		}
 	}
+	s.NextSteps = s.nextSteps()
 	return s
 }
 
