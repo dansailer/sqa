@@ -70,3 +70,14 @@ func TestAppend(t *testing.T) {
 		t.Fatalf("lines %d", n)
 	}
 }
+
+func TestCheckRejectsPrefixOnlyComment(t *testing.T) {
+	for _, c := range []string{"[sqa]", " [sqa]  ", "[sqa] "} {
+		if err := Check(true, c); !errors.Is(err, ErrMissing) {
+			t.Errorf("%q: want ErrMissing, got %v", c, err)
+		}
+	}
+	if err := Check(true, "[sqa] test fixture, not shipped"); err != nil {
+		t.Error(err)
+	}
+}

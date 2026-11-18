@@ -42,3 +42,18 @@ func TestShowLooksUpTheIssueOnTheGivenBranch(t *testing.T) {
 		}
 	}
 }
+
+func TestTriageRejectsPrefixOnlyComment(t *testing.T) {
+	e := newEnv(t)
+	for _, args := range [][]string{
+		{"mark", "AX-VULN", "fp", "--approved-by-user", "--comment", "[sqa]"},
+		{"hotspot", "HS-1", "safe", "--approved-by-user", "--comment", " [sqa] "},
+	} {
+		if code, _, _ := e.run(args...); code != ExitApproval {
+			t.Errorf("%v: exit %d, want %d", args, code, ExitApproval)
+		}
+	}
+	if len(e.posts()) != 0 {
+		t.Errorf("posted without a justification: %v", e.posts())
+	}
+}

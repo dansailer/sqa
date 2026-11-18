@@ -27,7 +27,8 @@ func Check(approvedByUser bool, comment string) error {
 	if !approvedByUser {
 		missing = append(missing, "--approved-by-user (the user must explicitly approve this specific finding first)")
 	}
-	if strings.TrimSpace(comment) == "" {
+	// "[sqa]" alone is what the server would get for an empty comment.
+	if strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(comment), strings.TrimSpace(CommentPrefix))) == "" {
 		missing = append(missing, `--comment "<the user's reasoning>"`)
 	}
 	if len(missing) > 0 {
