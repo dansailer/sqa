@@ -52,6 +52,7 @@ Read-only, run freely:
 | `sqa next [same filters] [--skip KEY]… [--include-open-pr]` | Highest-priority finding **without an open fix PR**, with the full brief (rule, why, location, code context, fix guidance). The default way to work one by one. `skipped` lists what it passed over. |
 | `sqa show <key>` | Brief for a specific key (one from `findings`, or that the user names), including any open fix PR. |
 | `sqa coverage [--project P] [--branch B \| --pr N] [--top N] [--overall]` | Files ranked by uncovered lines on new code (overall when there is no new-code period), with the gate's coverage condition. |
+| `sqa pr-body <key>... \| --from-findings [filters] [--reason TEXT]` | Markdown "Resolves SonarQube findings" block for a PR body, one line per finding (message linked to SonarQube, rule, location, key). |
 | `sqa coverage --file <file>` | That file's uncovered line ranges and partly covered conditions (`--file <dir>` ranks the files below it). |
 
 All three look up open fix PRs once per run through `gh` (or, without it,
@@ -160,16 +161,48 @@ never edit Sonar settings or exclusions without explicit approval.
    `<type>(<scope>): <summary>`, usually `fix` (security or bugs), `refactor`/`style`
    for maintainability smells, or `test` if only tests change; include the rule key,
    e.g. `fix(security): use parameterized query in getUser (go:S3649)`. PR body:
-   `[<message> (<rule> · <rule name>)](<SonarQube URL from sqa next/show>)`,
-   location, short why, what changed, tests run — not the raw finding key.
-   Apply the `sonar` label; if it is missing, ask before creating it, or tell
-   the user.
+   short why, what changed, tests run, and the block from
+   `sqa pr-body <key>...` listing **every finding the PR resolves** (see
+   "Findings a PR resolves" below). Apply the `sonar` label; if it is missing,
+   ask before creating it, or tell the user.
 3. Run the project's tests and linters. Show the user the change, then open the PR
    with the harness's normal git/forge tooling. Never merge it yourself.
 4. SonarQube only updates after a new analysis (CI or the user's usual scan). After
    it runs, verify with `sqa show <key>` or `sqa findings`. Return to the default
    branch, pull it, run `sqa next` (it skips the finding you just opened a PR
    for), and present that finding before touching it.
+
+## Findings a PR resolves
+
+- **List every finding the PR resolves in its body, one line each**, with
+  `sqa pr-body <key> [<key>...]`. It prints a "Resolves SonarQube findings"
+  block: message linked to the finding in SonarQube, rule key and name,
+  location and the key. Paste it unchanged; the keys are how `sqa next` and
+  `sqa findings` recognise that a finding already has a PR. This includes
+  findings the PR resolves indirectly (an exclusion, a config change, a fix
+  that removes several findings at once).
+- **Grouping needs explicit approval first.** One finding per PR is the
+  default. Before putting several findings in one PR, show the user the list
+  and get a yes for that grouped PR.
+- **Never add an unrelated fix silently.** If you notice something else while
+  fixing, present it as a separate finding or change and ask.
+
+### Config fixes (exclusions, test inclusions, coverage exclusions)
+
+A change to `sonar.exclusions`, `sonar.tests`/`sonar.test.inclusions`,
+`sonar.coverage.exclusions`, `sonar.issue.ignore.multicriteria` or similar
+removes every finding it covers, not just the one you were looking at:
+
+1. Only propose it when it is justified (e.g. test fixtures, generated code),
+   and never change Sonar settings without explicit approval.
+2. Before changing anything, list every finding the change will remove:
+   `sqa findings --file '<glob>'` (globs like `test/**` or `**/*_test.go` are
+   matched by sqa). Show the user that list and ask for approval of this
+   grouped PR.
+3. In the PR body, put the block from
+   `sqa pr-body --from-findings --file '<glob>' --reason "<the exclusion, e.g. excluding test fixtures via sonar.exclusions>"`
+   (or the named keys), so the body states that these findings are resolved
+   by the exclusion.
 
 ## Coverage
 

@@ -163,6 +163,7 @@ uses your values. `sqa auth status` and `sqa doctor` show the token store and
 | `sqa next` | Highest-priority finding **without an open fix PR**, with the same brief as `sqa show` (same filters). `--skip <key>` (repeatable) passes over a finding; `--include-open-pr` stops skipping findings with an open PR. |
 | `sqa show <key> [--context N] [--branch B\|--pr N] [--no-pr-check]` | Agent-ready brief for an issue or hotspot, including any open fix PR. |
 | `sqa coverage [--project P] [--branch B\|--pr N] [--top N] [--overall] [--fail-on PCT]` | Files ranked by uncovered lines on new code, with coverage %, uncovered lines and conditions, and the gate's coverage condition. |
+| `sqa pr-body <key>...` / `sqa pr-body --from-findings [filters] [--reason TEXT]` | Markdown "Resolves SonarQube findings" block for a PR body: one line per finding with its message linked to SonarQube, rule, location and key. Read-only. |
 | `sqa coverage --file <path>` | For a file: its uncovered line ranges and partly covered conditions. For a directory: the ranking below it. |
 | `sqa mark <issue-key> fp\|accept\|reopen --comment "…" --approved-by-user [--dry-run]` | Transition an issue and add a `[sqa]` comment. |
 | `sqa hotspot <key> safe\|fixed\|acknowledged --comment "…" --approved-by-user [--dry-run]` | Review a hotspot (status `REVIEWED`). |
@@ -203,6 +204,44 @@ review. They ask your forge, not SonarQube, and `sqa` never handles a token:
 
 `pr_check` in the output says which one was used (`gh`, `git`, `unavailable`,
 `off`). `--no-pr-check` skips the lookup, e.g. for `findings --fail-on` in CI.
+
+Each finding is matched on its own, so **one PR can cover several findings**:
+every key listed in its body counts (`AX-1` does not match `AX-12`). This is
+what grouped PRs need, e.g. adding test fixtures to `sonar.exclusions` removes
+a dozen findings at once. A branch name carries only one key, and the `git`
+fallback sees only branch names, so findings of a grouped PR are only
+recognised through the body, which needs `gh`.
+
+### PR bodies: `sqa pr-body`
+
+The skill tells agents to list every finding a PR resolves, one line each,
+including findings resolved indirectly by an exclusion or config change.
+`sqa pr-body` prints that block (read-only):
+
+```console
+$ sqa pr-body AZx1 AZx2
+### Resolves SonarQube findings
+
+- [Change this code to not construct SQL queries directly from user-controlled data.](https://sonarqube.example.com/project/issues?id=demo&issues=AZx1&open=AZx1) (`go:S3649` Database queries should not be vulnerable to injection attacks · `internal/api/users.go:27` · key `AZx1`)
+- ...
+
+# everything a config change removes, with the reason:
+$ sqa findings --file 'test/fixtures/**'
+$ sqa pr-body --from-findings --file 'test/fixtures/**' \
+    --reason "excluding test fixtures via sonar.exclusions"
+```
+
+It prints Markdown by default; `--format json` gives the findings plus the
+`markdown` field. `--from-findings` takes the same filters as `findings`
+(`--file`, `--branch`, `--new-code`, `--min-severity`, ...) and lists every match.
+
+### `--file`: paths and globs
+
+A plain `--file` path is passed to `sonar` / SonarQube: a file, or a
+directory's own files (not recursive). A value with `*`, `?` or `[` is a glob
+matched by `sqa` against the project-relative path: `*` stays within a
+directory, `**` crosses directories. `test/**` is everything below `test/`,
+`**/*_test.go` every Go test file. Quote globs so the shell leaves them alone.
 
 ### Coverage
 

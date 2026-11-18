@@ -139,6 +139,7 @@ Multiple servers: out of scope (one internal instance). `sonar` keeps one active
 | `sqa doctor` | Check `sonar` installed and version matches (warn on mismatch), authenticated (`sonar auth status`, shows server and source), server ≥ 2025.1 (or Community Build ≥ 25.1). |
 | `sqa findings` | Unified, ranked list of open issues (`OPEN`, `CONFIRMED`) + `TO_REVIEW` and `REVIEWED/ACKNOWLEDGED` hotspots, with status and `pr` columns (open fix PR, §6.1), ending with a quality gate summary (§6.2). Flags: `--project`, `--branch`, `--pr`, `--file`, `--new-code`, `--min-severity`, `--security-only`, `--limit` (default 50, 0 = all), `--fail-on`, `--no-acknowledged`, `--no-pr-check`, `--no-summary`, `--format`. |
 | `sqa next` | The highest-priority open finding without an open fix PR, with the same brief as `sqa show` (for one-at-a-time loops). `--skip <key>` (repeatable, comma-separated) passes over findings by hand; `--include-open-pr` turns PR skipping off. Output lists `skipped` (rank, key, reason `open PR` or `--skip`, pr), `total`, `remaining`, `pr_check`, `note`. |
+| `sqa pr-body` | `<key>...` or `--from-findings` with the `findings` filters, plus `--reason`: the Markdown "Resolves SonarQube findings" block for a PR body, one line per finding (§6.3). Markdown by default; `--format json` adds the findings. |
 | `sqa coverage` | Files ranked by uncovered lines on new code (overall without a new-code period or with `--overall`), with coverage %, uncovered lines and conditions and the gate's coverage condition; `--file` for a file's uncovered line ranges and partly covered conditions, or a directory's ranking; `--top`, `--fail-on <percent>` (§6.2). |
 | `sqa show <key>` | Agent-ready brief: rule, rationale (rule description sections `root_cause` / `assess_the_problem` / `how_to_fix`, or hotspot risk text), location, code context (`--context N`, default 5, HTML stripped), data-flow, possible verdicts, next step, and a URL to the finding on the server (from `sonar auth status`; the token is never read). Tries the key as an issue, then as a hotspot. |
 | `sqa version` | sqa version, pinned `sonar` version, whether it is bundled (version, SHA-256) and which `sonar` is in use. |
@@ -151,7 +152,25 @@ So an agent does not get stuck on (or duplicate) a finding that already has a fi
 2. If `gh` is missing, not logged in, or the remote is not GitHub: `git ls-remote --heads origin 'refs/heads/sonar/*'`, matched by branch name only. The reference is then `branch:<name>` and the note says a branch may have no open PR (works for GitLab and others).
 3. If both fail: nothing is skipped, `pr_check` is `unavailable` and `note` carries both errors. The command still succeeds.
 
+Every finding is looked up on its own, so one PR body listing several keys (a grouped PR, e.g. an exclusion change) marks all of them, and `next` skips all of them. A branch name only carries one key, so with the `git` fallback only that one is recognised.
+
 `pr_check` values: `gh`, `git`, `unavailable`, `off` (`--no-pr-check`), `none` (no findings, so no lookup). The `pr` field holds the PR URL (or `branch:<name>`), empty otherwise; the table shows `#12`, `!12` (GitLab MR) or `branch`.
+
+### 6.3 PR bodies (`sqa pr-body`) and `--file` globs
+
+`sqa pr-body` reads each key with `GetIssue`, falling back to the hotspot (`/api/hotspots/show`); an unknown key is a usage error. With `--from-findings` it runs the same gather as `findings` (without the forge lookup) and lists every match. Rule names come from `sonar api` `/api/rules/show`, cached per run; links use the server from `sonar auth status`. Output is
+
+```
+### Resolves SonarQube findings
+
+Resolved by: <reason>        (only with --reason)
+
+- [<message>](<SonarQube URL>) (`<rule>` <rule name> · `<file>:<line>` · key `<key>`)
+```
+
+The key is in each line so §6.1 matches every listed finding.
+
+`--file` (findings, next, pr-body): a value containing `*`, `?` or `[` is a glob. It is not sent to the server; sqa fetches the unfiltered list and keeps findings whose path matches (`*`/`?` within a segment, `**` across directories, `**/` also matches no directory). A plain path is passed to `sonar list issues --file` / hotspot `files` unchanged (a file, or a directory's own files).
 
 ### 6.2 Coverage (`sqa coverage`) and the `findings` summary
 
@@ -228,8 +247,9 @@ Frontmatter: `name: sqa`, `description: …`. Content:
 - What `sqa` is; prerequisite: `sqa doctor` must pass; the user (not the agent) runs `sqa auth login`.
 - **Hard rules**: never use, install or configure a SonarQube MCP server; never run `sonar integrate` or `sonar api`; never run `sonar auth login` (the user does that); never set, read or print tokens; always ask the user before any triage decision.
 - Triage order (§7) and how to read `next` / `findings` / `show` output.
-- The fix loop: `sqa next` skips findings with an already-open PR/MR (forge lookup, see §6.1); if a finding still shows a `pr`, or the lookup was `unavailable`/`git`, check the forge, do not duplicate and ask the user how to proceed; `--skip <key>` only when the user wants to leave a finding for now → one finding per branch/PR from the up-to-date default branch → fix and commit (Conventional Commits, include the rule key) → tests → open a PR (ask first; never merge; body links the finding by message and rule, not the raw key; apply the `sonar` label) → return to the default branch → (re-scan via CI or `sonar` analysis if available) → re-check with `sqa show <key>` / `sqa next`. Presentation: if the finding is in test code, accept or a Sonar exclusion may be appropriate; never edit Sonar settings without approval.
+- The fix loop: `sqa next` skips findings with an already-open PR/MR (forge lookup, see §6.1); if a finding still shows a `pr`, or the lookup was `unavailable`/`git`, check the forge, do not duplicate and ask the user how to proceed; `--skip <key>` only when the user wants to leave a finding for now → one finding per branch/PR from the up-to-date default branch → fix and commit (Conventional Commits, include the rule key) → tests → open a PR (ask first; never merge; body carries the `sqa pr-body` block listing every finding the PR resolves, including findings resolved indirectly; apply the `sonar` label) → return to the default branch → (re-scan via CI or `sonar` analysis if available) → re-check with `sqa show <key>` / `sqa next`. Presentation: if the finding is in test code, accept or a Sonar exclusion may be appropriate; never edit Sonar settings without approval.
 - Acknowledged hotspots: risk confirmed, fix pending; recommend the fix, or ask about `reopen` / `safe`. Hotspot comments and assignments are visible writes and need approval of the exact text/login.
+- Findings a PR resolves: one line each via `sqa pr-body`; grouping several findings in one PR needs explicit approval first; never add an unrelated fix silently. Config fixes (exclusions, test inclusions, coverage exclusions): list what they remove with `sqa findings --file '<glob>'`, get approval for the grouped PR, put `sqa pr-body --from-findings --file '<glob>' --reason "…"` in the body.
 - Coverage: when the summary shows failing coverage or the user asks, `sqa coverage` then `sqa coverage --file`; writing tests is normal code work under the fix loop (ask before branching/PRs, one PR per change, meaningful assertions, never change coverage settings or thresholds without approval).
 - How to present a recommendation and ask for approval (template), and that approval covers only the presented findings.
 - Never mark something FP/accepted just to reduce counts; justify every decision in the comment.
