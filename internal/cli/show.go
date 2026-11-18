@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -215,8 +214,7 @@ func loadBrief(ctx context.Context, r *sonarcli.Runner, key string, contextLines
 	} else {
 		h, err := r.ShowHotspot(ctx, key)
 		if err != nil {
-			var se *sonarcli.Error
-			if errors.As(err, &se) && strings.Contains(se.Stderr, "404") {
+			if isNotFound(err) {
 				return b, usageErr("no issue or hotspot with key %q", key)
 			}
 			return b, err

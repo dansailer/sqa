@@ -57,3 +57,16 @@ func TestTriageRejectsPrefixOnlyComment(t *testing.T) {
 		t.Errorf("posted without a justification: %v", e.posts())
 	}
 }
+
+// Only an HTTP 404 means "no such key"; a server error that happens to
+// mention 404 is a server error (exit 3).
+func TestShowServerErrorMentioning404IsNotNotFound(t *testing.T) {
+	e := newEnv(t)
+	code, _, stderr := e.run("show", "HS-500", "--no-pr-check")
+	if code != ExitServer || strings.Contains(stderr, "no issue or hotspot") {
+		t.Errorf("exit %d, want %d: %s", code, ExitServer, stderr)
+	}
+	if code, _, _ := e.run("show", "NOPE", "--no-pr-check"); code != ExitUsage {
+		t.Errorf("unknown key: exit %d, want %d", code, ExitUsage)
+	}
+}

@@ -14,6 +14,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -48,6 +50,19 @@ func (e *Error) Error() string {
 }
 
 func (e *Error) Unwrap() error { return e.Err }
+
+// reHTTPStatus matches how `sonar api` reports an HTTP error on stderr.
+var reHTTPStatus = regexp.MustCompile(`API error: (\d{3})\b`)
+
+// HTTPStatus is the HTTP status of a failed `sonar api` call, or 0.
+func (e *Error) HTTPStatus() int {
+	m := reHTTPStatus.FindStringSubmatch(e.Stderr)
+	if m == nil {
+		return 0
+	}
+	n, _ := strconv.Atoi(m[1])
+	return n
+}
 
 // ErrForbidden is returned when sqa is asked to run a sonar subcommand that it
 // must never run (for example `sonar integrate`, which installs MCP servers).

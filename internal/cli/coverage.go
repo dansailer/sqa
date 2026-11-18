@@ -437,7 +437,7 @@ func gatherCoverage(ctx context.Context, r *sonarcli.Runner, sc coverageScope, f
 // isNotFound reports a 404 from the server via `sonar api`.
 func isNotFound(err error) bool {
 	var se *sonarcli.Error
-	return errors.As(err, &se) && strings.Contains(se.Stderr, "404")
+	return errors.As(err, &se) && se.HTTPStatus() == 404
 }
 
 // isNoProject reports sonar's "could not determine project key" failure.
