@@ -260,7 +260,7 @@ mkdir -p "$nocurl"
 for d in /usr/local/bin /usr/bin /bin; do
 	for f in "$d"/*; do
 		n=${f##*/}
-		[ "$n" = curl ] || [ -e "$nocurl/$n" ] || ln -s "$f" "$nocurl/$n"
+		[ "$n" = curl ] || [ -e "$nocurl/$n" ] || [ -L "$nocurl/$n" ] || ln -s "$f" "$nocurl/$n"
 	done
 done
 for client in curl wget; do
