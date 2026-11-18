@@ -1,7 +1,8 @@
 #!/bin/sh
-# Tests for install.sh: local fake release (file:// and a GitHub API stand-in)
-# plus a checksum mismatch. A live anonymous install of v0.2.0 is last and
-# skipped if github.com is not reachable.
+# Tests for install.sh: local fake release (file:// and a github.com
+# stand-in that redirects releases/latest) plus checksum failures. Live
+# anonymous installs from github.com are last and skipped if it is not
+# reachable.
 set -eu
 
 CDPATH=
@@ -82,16 +83,16 @@ free_port() {
 
 start_api_port=
 start_api() {
-	# $1 = release dir, $2 = token (may be empty), $3 = log file
+	# $1 = release dir, $2 = tag ("" = no release), $3 = log file
 	# Sets start_api_port. Must not run in a command substitution:
 	# the server is backgrounded in this shell.
 	releasedir=$1
-	token=$2
+	tag=$2
 	log=$3
 	start_api_port=
 	port=$(free_port)
 	FAKE_RELEASE_DIR="$releasedir" FAKE_HOST=127.0.0.1 FAKE_PORT="$port" \
-		FAKE_TOKEN="$token" FAKE_TAG=v0.0.0 \
+		FAKE_TAG="$tag" \
 		python3 "$fake_py" >"$log" 2>&1 &
 	servers="$servers $!"
 	n=0
@@ -241,62 +242,154 @@ else
 	fi
 fi
 
-# 7. GitHub API path with a token: success, and the token never appears in the log
+# 7. latest release from the releases/latest redirect, with curl and with
+# wget only. A token in the environment and a logged-in gh are ignored:
+# the server refuses any Authorization header and gh must not run.
 test_token="sqa-test-token-do-not-leak"
-api_log="$work/api-server.log"
-: >"$api_log"
-if ! start_api "$release" "$test_token" "$api_log"; then
-	fail "fake GitHub API server failed to start"
+api_log="$work/web-server.log"
+if ! start_api "$release" v0.0.0 "$api_log"; then
+	fail "fake github.com server failed to start"
 fi
 port=$start_api_port
-bindir7="$work/opt/api/bin"
-: >"$work/stub7.log"
-if [ -n "$port" ] && run HOME="$home" SQA_STUB_LOG="$work/stub7.log" \
-	GITHUB_TOKEN="$test_token" \
-	SQA_GITHUB_API="http://127.0.0.1:${port}" \
-	SQA_INSTALL_DIR="$bindir7" \
-	"$install" --no-skill >"$log" 2>&1; then
-	# latest tag resolved from the API (no --version)
-	if [ -x "$bindir7/sqa" ] && [ "$("$bindir7/sqa" version)" = "sqa 0.0.0-test" ]; then
-		pass "GitHub API + token installs the latest release"
-	else
-		fail "API install did not write a working binary"
+ghstub="$work/ghstub"
+mkdir -p "$ghstub"
+printf '#!/bin/sh\nprintf "%%s\\n" "$*" >>"%s/gh.log"\nexit 0\n' "$work" >"$ghstub/gh"
+chmod 755 "$ghstub/gh"
+nocurl="$work/nocurl"
+mkdir -p "$nocurl"
+for d in /usr/local/bin /usr/bin /bin; do
+	for f in "$d"/*; do
+		n=${f##*/}
+		[ "$n" = curl ] || [ -e "$nocurl/$n" ] || ln -s "$f" "$nocurl/$n"
+	done
+done
+for client in curl wget; do
+	path="${ghstub}:$PATH"
+	if [ "$client" = wget ]; then
+		if [ ! -e "$nocurl/wget" ]; then
+			printf 'skipped: wget is not installed\n'
+			continue
+		fi
+		path="${ghstub}:${nocurl}"
 	fi
-else
-	if [ -n "$port" ]; then
-		fail "API install exited non-zero"
+	bindir7="$work/opt/web-$client/bin"
+	if [ -n "$port" ] && run HOME="$home" PATH="$path" \
+		GITHUB_TOKEN="$test_token" GH_TOKEN="$test_token" \
+		SQA_GITHUB="http://127.0.0.1:${port}" \
+		SQA_INSTALL_DIR="$bindir7" \
+		"$install" --no-skill >"$log" 2>&1; then
+		if [ -x "$bindir7/sqa" ] && grep -q 'installed sqa v0.0.0' "$log"; then
+			pass "latest release via the releases/latest redirect ($client)"
+		else
+			fail "redirect install ($client) did not install v0.0.0"
+			cat "$log" >&2
+		fi
+	elif [ -n "$port" ]; then
+		fail "redirect install ($client) exited non-zero"
 		cat "$log" >&2
 	fi
+	assert_no_secret "$log" "$test_token" "install.sh ($client)"
+done
+if grep -q 'AUTHORIZATION' "$api_log"; then
+	fail "install.sh sent an Authorization header"
+else
+	pass "no Authorization header sent"
 fi
-assert_no_secret "$log" "$test_token" "install.sh (API)"
-assert_no_secret "$api_log" "$test_token" "fake GitHub server"
+if [ -e "$work/gh.log" ]; then
+	fail "install.sh ran gh"
+else
+	pass "gh is not used"
+fi
 
-# 8. API path, wrong checksum still fails
-bad2="$work/bad-api"
+# 8. web path, wrong checksum still fails
+bad2="$work/bad-web"
 mkdir -p "$bad2"
 cp "$release/sqa_0.0.0_linux_amd64.tar.gz" "$bad2/"
 printf '%s  %s\n' "$(printf 'a%.0s' $(seq 1 64))" "sqa_0.0.0_linux_amd64.tar.gz" >"$bad2/checksums.txt"
-api_log2="$work/api-server2.log"
-if ! start_api "$bad2" "$test_token" "$api_log2"; then
-	fail "fake GitHub API server (mismatch) failed to start"
+if ! start_api "$bad2" v0.0.0 "$work/web-server2.log"; then
+	fail "fake github.com server (mismatch) failed to start"
 fi
 port2=$start_api_port
-bindir8="$work/opt/api-bad/bin"
-if [ -n "$port2" ] && run HOME="$home" GITHUB_TOKEN="$test_token" \
-	SQA_GITHUB_API="http://127.0.0.1:${port2}" \
+bindir8="$work/opt/web-bad/bin"
+if [ -n "$port2" ] && run HOME="$home" SQA_GITHUB="http://127.0.0.1:${port2}" \
 	SQA_INSTALL_DIR="$bindir8" \
 	"$install" --version v0.0.0 --no-skill >"$log" 2>&1; then
-	fail "API checksum mismatch exited 0"
-else
-	if [ -n "$port2" ] && grep -q 'checksum mismatch' "$log" && [ ! -e "$bindir8/sqa" ]; then
-		pass "API checksum mismatch fails and does not install"
-	elif [ -n "$port2" ]; then
-		fail "API checksum mismatch: unexpected output"
+	fail "web checksum mismatch exited 0"
+elif [ -n "$port2" ]; then
+	if grep -q 'checksum mismatch' "$log" && [ ! -e "$bindir8/sqa" ]; then
+		pass "web checksum mismatch fails and does not install"
+	else
+		fail "web checksum mismatch: unexpected output"
 		cat "$log" >&2
 	fi
 fi
-assert_no_secret "$log" "$test_token" "install.sh (API mismatch)"
-assert_no_secret "$api_log2" "$test_token" "fake GitHub server (mismatch)"
+
+# 8b. no release yet: releases/latest redirects to /releases
+if ! start_api "$release" "" "$work/web-server3.log"; then
+	fail "fake github.com server (no release) failed to start"
+fi
+port3=$start_api_port
+if [ -n "$port3" ] && run HOME="$home" SQA_GITHUB="http://127.0.0.1:${port3}" \
+	SQA_INSTALL_DIR="$work/opt/none/bin" \
+	"$install" --no-skill >"$log" 2>&1; then
+	fail "no release exited 0"
+elif [ -n "$port3" ]; then
+	if grep -q 'could not determine the latest release' "$log"; then
+		pass "no release: clear error"
+	else
+		fail "no release: unexpected output"
+		cat "$log" >&2
+	fi
+fi
+
+# 8c. install.ps1 against the same stand-in, when pwsh is installed
+# (GitHub's Ubuntu runners have it).
+if ! command -v pwsh >/dev/null 2>&1; then
+	printf 'skipped: pwsh is not installed (install.ps1 tests)\n'
+else
+	winrel="$work/win-release"
+	mkdir -p "$winrel"
+	python3 -c 'import sys, zipfile
+with zipfile.ZipFile(sys.argv[1], "w") as z:
+    z.writestr("sqa_0.0.0_windows_amd64/sqa.exe", "fake")' "$winrel/sqa_0.0.0_windows_amd64.zip"
+	(cd "$winrel" && sha256sum -- sqa_0.0.0_windows_amd64.zip >checksums.txt)
+	start_api "$winrel" v0.0.0 "$work/ps-server.log" || fail "fake github.com server (ps1) failed to start"
+	psport=$start_api_port
+	psdir="$work/opt/ps/bin"
+	if run HOME="$home" GITHUB_TOKEN="$test_token" SQA_GITHUB="http://127.0.0.1:${psport}" \
+		SQA_INSTALL_DIR="$psdir" SQA_NO_SKILL=1 \
+		pwsh -NoProfile -NonInteractive -File "$root/install.ps1" >"$log" 2>&1 &&
+		[ -f "$psdir/sqa.exe" ] && grep -q 'installed sqa v0.0.0' "$log"; then
+		pass "install.ps1: latest release via the redirect"
+	else
+		fail "install.ps1 redirect install"
+		cat "$log" >&2
+	fi
+	if grep -q 'AUTHORIZATION' "$work/ps-server.log"; then
+		fail "install.ps1 sent an Authorization header"
+	fi
+	printf '%s  %s\n' "$(printf 'b%.0s' $(seq 1 64))" sqa_0.0.0_windows_amd64.zip >"$winrel/checksums.txt"
+	if run HOME="$home" SQA_GITHUB="http://127.0.0.1:${psport}" SQA_VERSION=v0.0.0 \
+		SQA_INSTALL_DIR="$work/opt/ps-bad/bin" SQA_NO_SKILL=1 \
+		pwsh -NoProfile -NonInteractive -File "$root/install.ps1" >"$log" 2>&1; then
+		fail "install.ps1 checksum mismatch exited 0"
+	elif grep -q 'checksum mismatch' "$log" && [ ! -e "$work/opt/ps-bad/bin/sqa.exe" ]; then
+		pass "install.ps1: checksum mismatch fails"
+	else
+		fail "install.ps1 checksum mismatch: unexpected output"
+		cat "$log" >&2
+	fi
+	if run HOME="$home" SQA_GITHUB="http://127.0.0.1:${port3}" \
+		SQA_INSTALL_DIR="$work/opt/ps-none/bin" SQA_NO_SKILL=1 \
+		pwsh -NoProfile -NonInteractive -File "$root/install.ps1" >"$log" 2>&1; then
+		fail "install.ps1 without a release exited 0"
+	elif grep -q 'could not determine the latest release' "$log"; then
+		pass "install.ps1: no release, clear error"
+	else
+		fail "install.ps1 no release: unexpected output"
+		cat "$log" >&2
+	fi
+fi
 
 # 9. --help works on any OS and does not download
 if run "$install" --help >"$log" 2>&1; then
@@ -339,6 +432,15 @@ else
 	else
 		fail "live v0.2.0 install exited non-zero"
 		cat "$work/live.log" >&2
+	fi
+	latest="$work/live-latest"
+	mkdir -p "$latest"
+	if run SQA_INSTALL_DIR="$latest" HOME="$latest/home" PATH="$nogh_path" \
+		"$install" --no-skill >"$work/latest.log" 2>&1 && [ -x "$latest/sqa" ]; then
+		pass "live anonymous install of the latest release: $(grep -o 'installed sqa v[^ ]*' "$work/latest.log")"
+	else
+		fail "live latest install failed"
+		cat "$work/latest.log" >&2
 	fi
 fi
 

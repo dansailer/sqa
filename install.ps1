@@ -6,8 +6,7 @@
 #
 # Environment:
 #   SQA_VERSION, SQA_INSTALL_DIR (default %LOCALAPPDATA%\Programs\sqa), SQA_NO_SKILL=1
-#   GITHUB_TOKEN or GH_TOKEN — optional, avoids the anonymous GitHub API rate limit
-#   SQA_DOWNLOAD_BASE, SQA_GITHUB_API — test hooks
+#   SQA_DOWNLOAD_BASE, SQA_GITHUB — test hooks
 
 #Requires -Version 5.1
 [CmdletBinding()]
@@ -22,7 +21,6 @@ Set-StrictMode -Version Latest
 
 $Repo = 'dansailer/sqa'
 $GitHubWeb = $(if ($env:SQA_GITHUB) { $env:SQA_GITHUB } else { 'https://github.com' })
-$GitHubApi = $(if ($env:SQA_GITHUB_API) { $env:SQA_GITHUB_API } else { 'https://api.github.com' })
 
 function Show-Usage {
     @'
@@ -34,10 +32,9 @@ Usage:
   .\install.ps1 -Version v0.3.0 [-NoSkill]
 
 Installs to $env:SQA_INSTALL_DIR (default %LOCALAPPDATA%\Programs\sqa) and
-verifies the archive against checksums.txt. No GitHub login is needed.
-Optionally set GITHUB_TOKEN or GH_TOKEN, or authenticate with gh, to avoid
-GitHub's anonymous API rate limit (60 requests/hour per IP) when looking up
-the latest release; pinning -Version avoids that lookup.
+verifies the archive against checksums.txt. No GitHub login or token is
+needed: the latest release is read from the
+github.com/dansailer/sqa/releases/latest redirect.
 
 Skip skill install with -NoSkill or SQA_NO_SKILL=1.
 '@ | Write-Host
@@ -49,41 +46,19 @@ function Die {
     exit 1
 }
 
-function Get-GitHubToken {
-    if ($env:GITHUB_TOKEN) { return $env:GITHUB_TOKEN }
-    if ($env:GH_TOKEN) { return $env:GH_TOKEN }
-    return $null
-}
-
-function Test-GhAuth {
-    if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { return $false }
-    & gh auth status 2>$null | Out-Null
-    return ($LASTEXITCODE -eq 0)
-}
-
 function Invoke-Download {
     param(
         [Parameter(Mandatory = $true)][string]$Uri,
-        [Parameter(Mandatory = $true)][string]$OutFile,
-        [switch]$Api,
-        [string]$Accept = 'application/octet-stream'
+        [Parameter(Mandatory = $true)][string]$OutFile
     )
     if ($Uri -notmatch '^https?://') {
         Copy-Item -LiteralPath $Uri -Destination $OutFile -Force
         return
     }
-    $headers = @{ 'User-Agent' = 'sqa-install' }
-    if ($Api) {
-        $token = Get-GitHubToken
-        if ($token) { $headers['Authorization'] = "Bearer $token" }
-        $headers['Accept'] = $Accept
-        $headers['X-GitHub-Api-Version'] = '2022-11-28'
-    }
     try {
-        Invoke-WebRequest -Uri $Uri -OutFile $OutFile -Headers $headers -UseBasicParsing | Out-Null
+        Invoke-WebRequest -Uri $Uri -OutFile $OutFile -UserAgent 'sqa-install' -UseBasicParsing | Out-Null
     }
     catch {
-        # Re-throw without request headers so a token is never printed.
         throw "install.ps1: download failed for $(Split-Path -Leaf $Uri): $($_.Exception.Message)"
     }
 }
@@ -103,41 +78,27 @@ function Get-DownloadBaseUrl {
     return "$Base/$Name"
 }
 
-function Get-AssetApiUrl {
-    param($Release, [string]$Want)
-    foreach ($asset in @($Release.assets)) {
-        if ($asset.name -eq $Want -and $asset.url) {
-            return [string]$asset.url
-        }
-    }
-    return $null
-}
-
 function Get-LatestTag {
-    param([string]$Tmp)
     if ($Version) { return (ConvertTo-Tag $Version) }
     if ($env:SQA_DOWNLOAD_BASE) {
         Die 'set SQA_VERSION or pass -Version when using SQA_DOWNLOAD_BASE'
     }
-    if (Get-GitHubToken) {
-        $jsonPath = Join-Path $Tmp 'release.json'
-        Invoke-Download -Uri "$GitHubApi/repos/$Repo/releases/latest" -OutFile $jsonPath -Api -Accept 'application/vnd.github+json'
-        $rel = Get-Content -LiteralPath $jsonPath -Raw | ConvertFrom-Json
-        if (-not $rel.tag_name) { Die 'could not read tag_name from the GitHub latest-release response' }
-        return [string]$rel.tag_name
+    # github.com/<repo>/releases/latest redirects to .../releases/tag/<tag>;
+    # no API call, so no API rate limit and no token.
+    $url = "$GitHubWeb/$Repo/releases/latest"
+    try {
+        $resp = Invoke-WebRequest -Uri $url -UserAgent 'sqa-install' -UseBasicParsing
     }
-    if (Test-GhAuth) {
-        $tag = & gh release view --repo $Repo --json tagName --jq .tagName
-        if (-not $tag) { Die 'gh could not determine the latest sqa release' }
-        return [string]$tag.Trim()
+    catch {
+        Die "could not determine the latest release from $url (pass -Version): $($_.Exception.Message)"
     }
-    $jsonPath = Join-Path $Tmp 'release.json'
-    Invoke-Download -Uri "$GitHubApi/repos/$Repo/releases/latest" -OutFile $jsonPath
-    $rel = Get-Content -LiteralPath $jsonPath -Raw | ConvertFrom-Json
-    if (-not $rel.tag_name) {
-        Die 'could not determine the latest release (GitHub API rate limit? pass -Version, or set GITHUB_TOKEN or authenticate with gh)'
+    # Windows PowerShell: HttpWebResponse.ResponseUri; pwsh: HttpResponseMessage.RequestMessage.RequestUri.
+    $base = $resp.BaseResponse
+    $final = if ($base.PSObject.Properties['ResponseUri']) { $base.ResponseUri } else { $base.RequestMessage.RequestUri }
+    if ([string]$final -notmatch '/releases/tag/([^/?#]+)$') {
+        Die "could not determine the latest release from $url (pass -Version)"
     }
-    return [string]$rel.tag_name
+    return $Matches[1]
 }
 
 function Get-ReleaseAssets {
@@ -147,25 +108,6 @@ function Get-ReleaseAssets {
     if ($env:SQA_DOWNLOAD_BASE) {
         Invoke-Download -Uri (Get-DownloadBaseUrl $env:SQA_DOWNLOAD_BASE $archive) -OutFile (Join-Path $Tmp $archive)
         Invoke-Download -Uri (Get-DownloadBaseUrl $env:SQA_DOWNLOAD_BASE 'checksums.txt') -OutFile (Join-Path $Tmp 'checksums.txt')
-        return $archive
-    }
-    if (Get-GitHubToken) {
-        $jsonPath = Join-Path $Tmp 'release.json'
-        if (-not (Test-Path -LiteralPath $jsonPath)) {
-            Invoke-Download -Uri "$GitHubApi/repos/$Repo/releases/tags/$Tag" -OutFile $jsonPath -Api -Accept 'application/vnd.github+json'
-        }
-        $rel = Get-Content -LiteralPath $jsonPath -Raw | ConvertFrom-Json
-        $archiveUrl = Get-AssetApiUrl $rel $archive
-        $sumsUrl = Get-AssetApiUrl $rel 'checksums.txt'
-        if (-not $archiveUrl) { Die "release $Tag has no asset $archive" }
-        if (-not $sumsUrl) { Die "release $Tag has no asset checksums.txt" }
-        Invoke-Download -Uri $archiveUrl -OutFile (Join-Path $Tmp $archive) -Api
-        Invoke-Download -Uri $sumsUrl -OutFile (Join-Path $Tmp 'checksums.txt') -Api
-        return $archive
-    }
-    if (Test-GhAuth) {
-        & gh release download $Tag --repo $Repo --dir $Tmp --pattern $archive --pattern checksums.txt | Out-Null
-        if ($LASTEXITCODE -ne 0) { Die "gh release download failed for $Tag" }
         return $archive
     }
     Invoke-Download -Uri "$GitHubWeb/$Repo/releases/download/$Tag/$archive" -OutFile (Join-Path $Tmp $archive)
@@ -249,7 +191,7 @@ $tmp = $null
 try {
     $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("sqa-install-" + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $tmp | Out-Null
-    $tag = Get-LatestTag $tmp
+    $tag = Get-LatestTag
     $ver = $tag.TrimStart('v')
     $archive = Get-ReleaseAssets $tag $tmp
     Assert-Checksum $archive $tmp

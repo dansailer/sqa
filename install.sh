@@ -7,14 +7,12 @@
 #
 # Environment:
 #   SQA_VERSION, SQA_INSTALL_DIR (default ~/.local/bin), SQA_NO_SKILL=1
-#   GITHUB_TOKEN or GH_TOKEN — optional, avoids the anonymous GitHub API rate limit
-#   SQA_DOWNLOAD_BASE, SQA_GITHUB_API — test hooks (see testdata/install)
+#   SQA_DOWNLOAD_BASE, SQA_GITHUB — test hooks (see testdata/install)
 
 set -eu
 
 REPO="dansailer/sqa"
 GITHUB_WEB="${SQA_GITHUB:-https://github.com}"
-GITHUB_API="${SQA_GITHUB_API:-https://api.github.com}"
 
 usage() {
 	cat <<'EOF'
@@ -30,10 +28,9 @@ Options:
   -h, --help      Show this help.
 
 Installs to $SQA_INSTALL_DIR (default ~/.local/bin) and verifies the
-archive against checksums.txt. No GitHub login is needed. Optionally set
-GITHUB_TOKEN or GH_TOKEN, or authenticate with gh(1), to avoid GitHub's
-anonymous API rate limit (60 requests/hour per IP) when looking up the
-latest release; pinning --version avoids that lookup.
+archive against checksums.txt. No GitHub login or token is needed: the
+latest release is read from the github.com/dansailer/sqa/releases/latest
+redirect.
 EOF
 }
 
@@ -49,102 +46,35 @@ cleanup() {
 	fi
 }
 
-github_token() {
-	if [ -n "${GITHUB_TOKEN:-}" ]; then
-		printf '%s' "$GITHUB_TOKEN"
-	elif [ -n "${GH_TOKEN:-}" ]; then
-		printf '%s' "$GH_TOKEN"
-	fi
-}
-
-has_github_token() {
-	[ -n "${GITHUB_TOKEN:-}" ] || [ -n "${GH_TOKEN:-}" ]
-}
-
 have_cmd() {
 	command -v "$1" >/dev/null 2>&1
 }
 
-# download URL DEST [api]
-# The optional third argument "api" adds a GitHub auth header and the
-# Accept value in $4 (default application/octet-stream). The token is
-# never printed.
+# download URL DEST
 download() {
-	url=$1
-	dest=$2
-	mode=${3:-}
-	accept=${4:-application/octet-stream}
-
 	if have_cmd curl; then
-		if [ "$mode" = api ]; then
-			token=$(github_token)
-			curl -fsSL --connect-timeout 30 --max-time 300 \
-				-A "sqa-install" \
-				-H "Authorization: Bearer ${token}" \
-				-H "Accept: ${accept}" \
-				-H "X-GitHub-Api-Version: 2022-11-28" \
-				-o "$dest" \
-				"$url"
-		else
-			curl -fsSL --connect-timeout 30 --max-time 300 \
-				-A "sqa-install" \
-				-o "$dest" \
-				"$url"
-		fi
-	elif have_cmd wget; then
-		if [ "$mode" = api ]; then
-			token=$(github_token)
-			wget -q --timeout=30 --tries=3 \
-				-U "sqa-install" \
-				--header="Authorization: Bearer ${token}" \
-				--header="Accept: ${accept}" \
-				--header="X-GitHub-Api-Version: 2022-11-28" \
-				-O "$dest" \
-				"$url"
-		else
-			wget -q --timeout=30 --tries=3 \
-				-U "sqa-install" \
-				-O "$dest" \
-				"$url"
-		fi
+		curl -fsSL --connect-timeout 30 --max-time 300 -A "sqa-install" -o "$2" "$1"
 	else
-		die "need curl or wget to download sqa"
+		wget -q --timeout=30 --tries=3 -U "sqa-install" -O "$2" "$1"
 	fi
 }
 
-# Asset API URL for NAME from a GitHub release JSON file.
-asset_api_url() {
-	json=$1
-	want=$2
-	awk -v want="$want" '
-		BEGIN { RS = "{" }
-		{
-			name = ""
-			url = ""
-			n = split($0, a, "\"")
-			for (i = 1; i <= n; i++) {
-				if (a[i] != "name" && a[i] != "url") {
-					continue
-				}
-				# a[i+1] is the text between this key and the next
-				# quoted string, typically `: ` or `": "`.
-				if (a[i] == "name") {
-					name = a[i + 2]
-				}
-				if (a[i] == "url" && a[i + 2] ~ /\/releases\/assets\/[0-9]+$/) {
-					url = a[i + 2]
-				}
-			}
-			if (name == want && url != "") {
-				print url
-				exit 0
-			}
-		}
-	' "$json"
-}
-
-tag_from_release_json() {
-	sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$1" | head -n 1
+# latest_tag prints the tag that ${GITHUB_WEB}/${REPO}/releases/latest
+# redirects to (.../releases/tag/<tag>), without the rate-limited GitHub API.
+latest_tag() {
+	url="${GITHUB_WEB}/${REPO}/releases/latest"
+	if have_cmd curl; then
+		final=$(curl -fsSL --connect-timeout 30 --max-time 60 -A "sqa-install" \
+			-o /dev/null -w '%{url_effective}' "$url") || return 1
+	else
+		# wget exits non-zero when it stops at the redirect; read Location.
+		final=$(wget -q -S --max-redirect=0 -U "sqa-install" -O /dev/null "$url" 2>&1 |
+			sed -n 's/^ *[Ll]ocation: *//p' | tr -d '\r' | tail -n 1)
+	fi
+	case "$final" in
+	*/releases/tag/?*) printf '%s' "${final##*/releases/tag/}" ;;
+	*) return 1 ;;
+	esac
 }
 
 sha256_of() {
@@ -203,24 +133,7 @@ resolve_tag() {
 	if [ -n "${SQA_DOWNLOAD_BASE:-}" ]; then
 		die "pass --version or set SQA_VERSION when using SQA_DOWNLOAD_BASE"
 	fi
-	if has_github_token; then
-		release_json="$tmpdir/release.json"
-		download "${GITHUB_API}/repos/${REPO}/releases/latest" "$release_json" api "application/vnd.github+json"
-		tag=$(tag_from_release_json "$release_json")
-		[ -n "$tag" ] || die "could not read tag_name from the GitHub latest-release response"
-		printf '%s' "$tag"
-		return
-	fi
-	if have_cmd gh && gh auth status >/dev/null 2>&1; then
-		tag=$(gh release view --repo "$REPO" --json tagName --jq .tagName)
-		[ -n "$tag" ] || die "gh could not determine the latest sqa release"
-		printf '%s' "$tag"
-		return
-	fi
-	release_json="$tmpdir/release.json"
-	download "${GITHUB_API}/repos/${REPO}/releases/latest" "$release_json"
-	tag=$(tag_from_release_json "$release_json")
-	[ -n "$tag" ] || die "could not determine the latest release (GitHub API rate limit? pass --version, or set GITHUB_TOKEN or authenticate with gh)"
+	tag=$(latest_tag) || die "could not determine the latest release from ${GITHUB_WEB}/${REPO}/releases/latest (pass --version)"
 	printf '%s' "$tag"
 }
 
@@ -232,28 +145,6 @@ fetch_assets() {
 	if [ -n "${SQA_DOWNLOAD_BASE:-}" ]; then
 		download "$(download_base_url "$SQA_DOWNLOAD_BASE" "$archive")" "$tmpdir/$archive"
 		download "$(download_base_url "$SQA_DOWNLOAD_BASE" "checksums.txt")" "$tmpdir/checksums.txt"
-		printf '%s' "$archive"
-		return
-	fi
-
-	if has_github_token; then
-		release_json="$tmpdir/release.json"
-		if [ ! -s "$release_json" ]; then
-			download "${GITHUB_API}/repos/${REPO}/releases/tags/${tag}" "$release_json" api "application/vnd.github+json"
-		fi
-		archive_url=$(asset_api_url "$release_json" "$archive")
-		sums_url=$(asset_api_url "$release_json" "checksums.txt")
-		[ -n "$archive_url" ] || die "release ${tag} has no asset ${archive}"
-		[ -n "$sums_url" ] || die "release ${tag} has no asset checksums.txt"
-		download "$archive_url" "$tmpdir/$archive" api
-		download "$sums_url" "$tmpdir/checksums.txt" api
-		printf '%s' "$archive"
-		return
-	fi
-
-	if have_cmd gh && gh auth status >/dev/null 2>&1; then
-		gh release download "$tag" --repo "$REPO" --dir "$tmpdir" \
-			--pattern "$archive" --pattern "checksums.txt" >/dev/null
 		printf '%s' "$archive"
 		return
 	fi

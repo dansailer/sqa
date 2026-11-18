@@ -83,11 +83,12 @@ Installs to `$env:SQA_INSTALL_DIR` (default `%LOCALAPPDATA%\Programs\sqa`),
 verifies the archive against `checksums.txt`, and runs `sqa skill install`
 (skip with `$env:SQA_NO_SKILL = '1'`).
 
-mise also works on Windows. No GitHub login is needed for any method. Looking
-up the latest release uses GitHub's API, which allows 60 anonymous requests per
-hour per IP; if you hit that limit (shared CI runners, for example), pin a
-version or set `GITHUB_TOKEN` (`export GITHUB_TOKEN=$(gh auth token)`, or
-`$env:GITHUB_TOKEN = (gh auth token)`); mise also accepts `MISE_GITHUB_TOKEN`.
+mise also works on Windows. No GitHub login or token is needed. Both scripts
+read the latest release from the `github.com/dansailer/sqa/releases/latest`
+redirect, not GitHub's rate-limited API, and download the assets from the
+public release. mise looks the release up through GitHub's API (60 anonymous
+requests per hour per IP); if you hit that limit, pin a version or set
+`MISE_GITHUB_TOKEN`.
 
 ### Which `sonar` is used
 

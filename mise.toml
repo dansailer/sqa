@@ -111,7 +111,7 @@ description = "shellcheck install.sh and its tests"
 run = "shellcheck install.sh testdata/install/test.sh"
 
 [tasks.test-install]
-description = "Run install.sh against a local fake release (checksum mismatch included)"
+description = "Run install.sh (and install.ps1 when pwsh is installed) against a local fake release"
 run = "sh testdata/install/test.sh"
 
 [tasks.lint]
