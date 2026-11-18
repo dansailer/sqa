@@ -44,7 +44,8 @@ case "$1" in
     fi
     case " $* " in
       *" --branch "*|*" --pull-request "*) ;;
-      *) if [ -n "${FAKE_DETECT_PR:-}" ]; then echo "Using pull request ${FAKE_DETECT_PR} (auto-detected from CI)" >&2; fi ;;
+      # Real sonar picks a PR from the local git branch when given neither.
+      *) if [ -n "${FAKE_DETECT_PR:-}" ]; then echo "Using pull request ${FAKE_DETECT_PR} (auto-detected from branch fix/x)" >&2; fi ;;
     esac
     if [ $newcode -eq 1 ]; then cat "$d/issues_newcode.json"; else cat "$d/issues.json"; fi
     exit 0 ;;
@@ -60,6 +61,7 @@ case "$1" in
     fi
     case "$path" in
       /api/server/version*) cat "$d/server_version.txt" ;;
+      /api/project_branches/list*) echo '{"branches":[{"name":"feature/x","isMain":false,"type":"BRANCH"},{"name":"main","isMain":true,"type":"BRANCH"}]}' ;;
       /api/hotspots/search*resolution=ACKNOWLEDGED*)
         # Acknowledged hotspots only when a test sets FAKE_ACK; never on new code.
         case "$path" in

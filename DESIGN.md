@@ -88,7 +88,7 @@ Auth, TLS and proxy: handled by `sonar` (see `sonar config` for proxy/CA setting
 
 - `sonar --version` prints the short version (`1.12.0`) on stdout (banner on stderr).
 - `sonar auth status --format json` prints `{"status": "connected"|"not_authenticated"|"token_missing"|"token_invalid"|"unreachable"|…, "server", "org", "source", "message"}` and exits 1 when not connected.
-- `sonar list issues --format json` prints the unmodified `/api/issues/search` response (`total`, `paging`, `issues[]` with `key, rule, severity, type, impacts[{softwareQuality, severity}], issueStatus, component, line, textRange, flows, message`, and `components[]` with `path`). It announces auto-detection on stderr (`Using auto-detected project key: …`, `Using pull request N (auto-detected from branch …)`), which `sqa` parses so hotspot queries use the same project and PR. Pagination: `--page-size 500 --page N`.
+- `sonar list issues --format json` prints the unmodified `/api/issues/search` response (`total`, `paging`, `issues[]` with `key, rule, severity, type, impacts[{softwareQuality, severity}], issueStatus, component, line, textRange, flows, message`, and `components[]` with `path`). It announces auto-detection on stderr (`Using auto-detected project key: …`), which `sqa` parses so hotspot queries use the same project. Without `--branch`/`--pull-request` it also picks a pull request from the local git branch (`Using pull request N (auto-detected from branch …)`); `sqa` prevents that by always passing `--branch <main branch>` (from `/api/project_branches/list`) or the user's `--branch`/`--pr` (see §5 scope). Pagination: `--page-size 500 --page N`.
 - New code: the issues response has no per-issue new-code flag, so `sqa findings` makes a second call with `--new-code` (and `inNewCodePeriod=true` for hotspots) and marks the keys returned. On a pull request every finding counts as new code.
 
 ## 5. Authentication and configuration
@@ -124,7 +124,9 @@ skills:
 
 Location: `$SQA_CONFIG`, else `$XDG_CONFIG_HOME/sqa/config.yaml`, else `~/.config/sqa/config.yaml` (on Windows, `%APPDATA%\sqa\config.yaml` when no XDG override is set).
 
-Project resolution: `--project` → `default_project` → `sonar` auto-detection (`sonar link`). If none works, `sqa findings` exits 2 asking for `--project`.
+Project resolution: `--project` → `default_project` → `sonar` auto-detection (`sonar link`, git remote; one `sonar list issues --page-size 1` call). If none works, `sqa findings` exits 2 asking for `--project`.
+
+Scope: `--branch` or `--pr` when given, otherwise the project's main branch, for every command (findings, next, show, coverage, pr-body and the gate summary). `sqa` never derives a branch or pull request from the local git checkout: the fix loop branches from the default branch, so the main branch is the right default. Web API calls simply omit `branch`/`pullRequest`; `sonar list issues` gets the main branch by name.
 
 Multiple servers: out of scope (one internal instance). `sonar` keeps one active saved connection; switching would be `sqa auth login --server <other>` or per-shell env vars.
 
@@ -176,7 +178,7 @@ The key is in each line so §6.1 matches every listed finding.
 
 `sonar` 1.12 has no coverage command; `sonar quality-gate status --category coverage` lists worst-covered files only for an already failing coverage condition and has no line detail. Coverage is therefore its own read-only verb, not a finding type: it has no key, status or triage verdict, does not fit the security-first order, and only changes after the next analysis that imports a coverage report.
 
-- `sqa coverage` resolves the project like `findings` (flags, `default_project`, else one `sonar list issues --page-size 1` call for `sonar`'s auto-detection, including the PR). It reads the scope's measures (`/api/measures/component`; `new_coverage`, `new_lines_to_cover`, `new_uncovered_lines`, `new_uncovered_conditions` and the overall ones), the gate (`/api/qualitygates/project_status`; condition on `new_coverage` or `coverage`), and the files below the scope sorted by uncovered lines (`/api/measures/component_tree`). New-code values come from the measure's `period.value` (or `periods[0].value` on older servers).
+- `sqa coverage` resolves the project and scope like `findings` (§5). It reads the scope's measures (`/api/measures/component`; `new_coverage`, `new_lines_to_cover`, `new_uncovered_lines`, `new_uncovered_conditions` and the overall ones), the gate (`/api/qualitygates/project_status`; condition on `new_coverage` or `coverage`), and the files below the scope sorted by uncovered lines (`/api/measures/component_tree`). New-code values come from the measure's `period.value` (or `periods[0].value` on older servers).
 - Scope: new code, unless the project has no `new_lines_to_cover` measure (no new-code period; a note says so) or `--overall`. Fully covered files are dropped from the ranking. `--top N` (default 20, at most 500) is the page size.
 - `--file <path>`: the component `<project>:<path>`. A directory ranks the files below it; a file reads `/api/sources/lines` for the whole file and reports uncovered line ranges (`lineHits == 0`) and lines with `coveredConditions < conditions`, limited to `isNew` lines in the new-code scope. Lines without `lineHits` are not executable or not covered by the report; if no line has coverage data, a note says so. An unknown path is a usage error (exit 2).
 - `--fail-on <percent>` exits 1 when the scope's coverage is below it (no coverage value: no failure).

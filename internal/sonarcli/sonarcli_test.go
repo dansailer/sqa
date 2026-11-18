@@ -8,10 +8,10 @@ import (
 
 func TestParseDetected(t *testing.T) {
 	d := ParseDetected([]byte("Using auto-detected project key: my-proj\n     Using pull request 42 (auto-detected from branch feat/x)\n"))
-	if d.Project != "my-proj" || d.PullRequest != "42" {
+	if d.Project != "my-proj" {
 		t.Fatalf("%+v", d)
 	}
-	if d := ParseDetected(nil); d.Project != "" || d.PullRequest != "" {
+	if d := ParseDetected(nil); d.Project != "" {
 		t.Fatalf("%+v", d)
 	}
 }

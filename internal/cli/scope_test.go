@@ -5,29 +5,58 @@ import (
 	"testing"
 )
 
-// In CI sonar auto-detects the pull request; the brief `next` prints must
-// read the issue, its code and its link from that PR, not the main branch.
-func TestNextBriefUsesAutoDetectedPR(t *testing.T) {
+// Without --branch/--pr every command reads the main branch: sonar would
+// otherwise pick a pull request from the local git branch, so sqa passes the
+// main branch by name to `sonar list issues` and nothing else gets a PR.
+func TestNoBranchOrPRMeansMainBranchEverywhere(t *testing.T) {
 	e := newEnv(t)
 	t.Setenv("FAKE_DETECT_PR", "42")
 	n := runNext(t, e, "--no-pr-check")
 	if n.Finding == nil || n.Brief == nil {
 		t.Fatalf("no brief: %+v", n)
 	}
-	if !strings.Contains(n.Brief.URL, "pullRequest=42") {
-		t.Errorf("brief URL not scoped to the PR: %s", n.Brief.URL)
+	for _, args := range [][]string{
+		{"findings", "--no-pr-check"},
+		{"pr-body", "--from-findings"},
+		{"coverage"},
+		{"show", "AX-VULN", "--no-pr-check"},
+	} {
+		if code, _, stderr := e.run(append(args, "--format", "json")...); code != 0 {
+			t.Fatalf("%v: exit %d %s", args, code, stderr)
+		}
 	}
-	var issue, lines bool
+	lists := 0
 	for _, c := range e.calls() {
-		if strings.Contains(c, "/api/issues/search?") && strings.Contains(c, "issues="+n.Finding.Key) {
-			issue = strings.Contains(c, "pullRequest=42")
+		if strings.Contains(c, "pullRequest") || strings.Contains(c, "--pull-request") {
+			t.Errorf("auto-detected PR leaked into: %s", c)
 		}
-		if strings.Contains(c, "/api/sources/lines?") {
-			lines = strings.Contains(c, "pullRequest=42")
+		if strings.HasPrefix(c, "list issues") {
+			lists++
+			if !strings.Contains(c, "--branch main") && !strings.Contains(c, "--page-size 1 ") {
+				t.Errorf("list issues without the main branch: %s", c)
+			}
 		}
 	}
-	if !issue || !lines {
-		t.Errorf("issue lookup scoped=%v, code context scoped=%v; calls: %v", issue, lines, e.calls())
+	if lists == 0 {
+		t.Fatal("no list issues call")
+	}
+	if strings.Contains(n.Brief.URL, "branch=") || strings.Contains(n.Brief.URL, "pullRequest") {
+		t.Errorf("main-branch link must not name a branch: %s", n.Brief.URL)
+	}
+}
+
+func TestExplicitBranchAndPRArePassedThrough(t *testing.T) {
+	e := newEnv(t)
+	if code, _, stderr := e.run("findings", "--pr", "7", "--no-pr-check", "--format", "json"); code != 0 {
+		t.Fatalf("exit %d %s", code, stderr)
+	}
+	for _, c := range e.calls() {
+		if strings.Contains(c, "project_branches") {
+			t.Errorf("no main-branch lookup needed with --pr: %s", c)
+		}
+		if strings.HasPrefix(c, "list issues") && !strings.Contains(c, "--pull-request 7") {
+			t.Errorf("--pr not passed: %s", c)
+		}
 	}
 }
 
@@ -82,7 +111,7 @@ func TestFindingsFilePathIsNormalised(t *testing.T) {
 	}
 	n := 0
 	for _, c := range e.calls() {
-		if strings.HasPrefix(c, "list issues") {
+		if strings.HasPrefix(c, "list issues") && !strings.Contains(c, "--page-size 1 ") {
 			n++
 			if !strings.Contains(c, "--file internal/api ") && !strings.HasSuffix(c, "--file internal/api") {
 				t.Errorf("not normalised: %s", c)

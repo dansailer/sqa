@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -195,9 +194,6 @@ func clip(s string, n int) string {
 // It only talks to SonarQube; markOpenPRs adds the forge lookup.
 func (a *app) gather(ctx context.Context, r *sonarcli.Runner, s scopeFlags) (FindingsResult, error) {
 	res := FindingsResult{Branch: s.branch, PullRequest: s.pr}
-	if s.branch != "" && s.pr != "" {
-		return res, usageErr("--branch and --pr cannot be combined")
-	}
 	minSev := findings.SevUnknown
 	if s.minSeverity != "" {
 		v, err := findings.ParseSeverity(s.minSeverity)
@@ -206,10 +202,16 @@ func (a *app) gather(ctx context.Context, r *sonarcli.Runner, s scopeFlags) (Fin
 		}
 		minSev = v
 	}
-	project := s.project
-	if project == "" {
-		project = a.cfg.DefaultProject
+	sc, err := a.resolveScope(ctx, r, s.project, s.branch, s.pr)
+	if err != nil {
+		return res, err
 	}
+	listBranch, err := sc.listBranch(ctx, r)
+	if err != nil {
+		return res, err
+	}
+	project := sc.project
+	res.Project = project
 	// A glob is matched by sqa on the full list; a plain path goes to the
 	// server (sonar's --file: a file, or a directory's own files).
 	serverFile := projectPath(s.file)
@@ -221,32 +223,18 @@ func (a *app) gather(ctx context.Context, r *sonarcli.Runner, s scopeFlags) (Fin
 		}
 		serverFile, match = "", m
 	}
-	opts := sonarcli.ListIssuesOptions{Project: project, Branch: s.branch, PullRequest: s.pr, File: serverFile, NewCode: s.newCode}
-	issues, comps, det, err := r.ListIssues(ctx, opts, 0)
+	opts := sonarcli.ListIssuesOptions{Project: project, Branch: listBranch, PullRequest: s.pr, File: serverFile, NewCode: s.newCode}
+	issues, comps, _, err := r.ListIssues(ctx, opts, 0)
 	if err != nil {
-		var se *sonarcli.Error
-		if errors.As(err, &se) && strings.Contains(se.Stderr, "Could not determine project key") {
-			return res, usageErr("could not determine the project key: pass --project, set default_project in config.yaml, or run `sonar link <projectKey>` in the repository")
-		}
 		return res, err
 	}
-	if project == "" {
-		project = det.Project
-	}
-	if res.PullRequest == "" && res.Branch == "" {
-		res.PullRequest = det.PullRequest
-	}
-	if project == "" {
-		return res, usageErr("could not determine the project key: pass --project, set default_project in config.yaml, or run `sonar link`")
-	}
-	res.Project = project
 	// On a pull request everything is new code; otherwise ask the server
 	// which findings are on new code.
-	allNew := s.newCode || res.PullRequest != ""
+	allNew := s.newCode || s.pr != ""
 	newIssues := map[string]bool{}
 	if !allNew && len(issues) > 0 {
 		o := opts
-		o.Project, o.PullRequest, o.NewCode = project, res.PullRequest, true
+		o.NewCode = true
 		ni, _, _, err := r.ListIssues(ctx, o, 0)
 		if err != nil {
 			return res, err
@@ -260,7 +248,7 @@ func (a *app) gather(ctx context.Context, r *sonarcli.Runner, s scopeFlags) (Fin
 		all = append(all, findings.FromIssue(i, comps, allNew || newIssues[i.Key]))
 	}
 
-	hopts := sonarcli.SearchHotspotsOptions{Project: project, Branch: s.branch, PullRequest: res.PullRequest, NewCode: s.newCode, Status: "TO_REVIEW"}
+	hopts := sonarcli.SearchHotspotsOptions{Project: project, Branch: s.branch, PullRequest: s.pr, NewCode: s.newCode, Status: "TO_REVIEW"}
 	if serverFile != "" {
 		hopts.Files = []string{serverFile}
 	}
@@ -368,7 +356,7 @@ then by severity, new code first, file and line.`,
 				res.Shown = limit
 			}
 			if !noSummary {
-				res.Summary = gateSummary(cmd.Context(), r, res.Project, s.branch, res.PullRequest)
+				res.Summary = gateSummary(cmd.Context(), r, res.Project, s.branch, s.pr)
 			}
 			if err := a.out(res); err != nil {
 				return err
@@ -509,8 +497,7 @@ the lookup off, --skip <key> passes over a finding by hand (repeatable).`,
 			n := NextResult{Project: res.Project, Total: res.Total, Remaining: remaining, PRCheck: res.PRCheck, Note: res.Note, Skipped: skipped}
 			if f != nil {
 				n.Finding = f
-				// res.PullRequest includes a PR sonar auto-detected in CI.
-				b, err := loadBrief(ctx, r, f.Key, defaultContextLines, s.branch, res.PullRequest)
+				b, err := loadBrief(ctx, r, f.Key, defaultContextLines, s.branch, s.pr)
 				if err != nil {
 					return err
 				}

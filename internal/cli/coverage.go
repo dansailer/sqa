@@ -234,43 +234,6 @@ func fileDetail(file string, lines []sonarcli.SourceLine, onlyNew bool) FileCove
 	return d
 }
 
-type coverageScope struct {
-	project, branch, pr string
-}
-
-// resolveScope fills in the project (and PR) the way `sqa findings` does:
-// flags, then default_project, then sonar's auto-detection, which needs one
-// `sonar list issues --page-size 1` call.
-func (a *app) resolveScope(ctx context.Context, r *sonarcli.Runner, project, branch, pr string) (coverageScope, error) {
-	if branch != "" && pr != "" {
-		return coverageScope{}, usageErr("--branch and --pr cannot be combined")
-	}
-	if project == "" {
-		project = a.cfg.DefaultProject
-	}
-	sc := coverageScope{project: project, branch: branch, pr: pr}
-	if project != "" && (branch != "" || pr != "") {
-		return sc, nil
-	}
-	_, _, det, err := r.ListIssues(ctx, sonarcli.ListIssuesOptions{Project: project, Branch: branch, PullRequest: pr, PageSize: 1}, 1)
-	if err != nil {
-		if project == "" && isNoProject(err) {
-			return sc, usageErr("could not determine the project key: pass --project, set default_project in config.yaml, or run `sonar link <projectKey>` in the repository")
-		}
-		return sc, err
-	}
-	if sc.project == "" {
-		sc.project = det.Project
-	}
-	if sc.branch == "" && sc.pr == "" {
-		sc.pr = det.PullRequest
-	}
-	if sc.project == "" {
-		return sc, usageErr("could not determine the project key: pass --project, set default_project in config.yaml, or run `sonar link`")
-	}
-	return sc, nil
-}
-
 func measureInt(c sonarcli.MeasuredComponent, metric string) int {
 	return int(math.Round(c.Measures[metric]))
 }
@@ -358,7 +321,7 @@ Read-only. Data comes from the last analysis that imported a coverage report.`,
 	return cmd
 }
 
-func gatherCoverage(ctx context.Context, r *sonarcli.Runner, sc coverageScope, file string, top int, overall bool) (CoverageResult, error) {
+func gatherCoverage(ctx context.Context, r *sonarcli.Runner, sc scope, file string, top int, overall bool) (CoverageResult, error) {
 	res := CoverageResult{Project: sc.project, Branch: sc.branch, PullRequest: sc.pr, Files: []CoverageFile{}}
 	component := sc.project
 	if file != "" {

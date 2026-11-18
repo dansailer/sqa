@@ -123,27 +123,45 @@ func (o ListIssuesOptions) Args() []string {
 	return args
 }
 
-// Detected holds what sonar auto-detected and announced on stderr.
+// Detected holds what sonar auto-detected and announced on stderr. sqa only
+// takes the project key from it: sonar also picks a pull request from the
+// local git branch when neither --branch nor --pull-request is given, which
+// sqa avoids by always passing one (see MainBranch).
 type Detected struct {
-	Project     string
-	PullRequest string
+	Project string
 }
 
-var (
-	reProject = regexp.MustCompile(`Using auto-detected project key:\s*(\S+)`)
-	rePR      = regexp.MustCompile(`Using pull request\s+(\S+)\s+\(auto-detected`)
-)
+var reProject = regexp.MustCompile(`Using auto-detected project key:\s*(\S+)`)
 
-// ParseDetected extracts auto-detected project / PR from sonar stderr.
+// ParseDetected extracts the auto-detected project key from sonar stderr.
 func ParseDetected(stderr []byte) Detected {
 	var d Detected
 	if m := reProject.FindSubmatch(stderr); m != nil {
 		d.Project = strings.Trim(string(m[1]), "'\"`.")
 	}
-	if m := rePR.FindSubmatch(stderr); m != nil {
-		d.PullRequest = strings.Trim(string(m[1]), "'\"`.")
-	}
 	return d
+}
+
+// MainBranch returns the name of the project's main branch
+// (/api/project_branches/list).
+func (r *Runner) MainBranch(ctx context.Context, project string) (string, error) {
+	q := url.Values{}
+	q.Set("project", project)
+	var resp struct {
+		Branches []struct {
+			Name   string `json:"name"`
+			IsMain bool   `json:"isMain"`
+		} `json:"branches"`
+	}
+	if err := r.getJSON(ctx, "/api/project_branches/list", q, &resp); err != nil {
+		return "", err
+	}
+	for _, b := range resp.Branches {
+		if b.IsMain && b.Name != "" {
+			return b.Name, nil
+		}
+	}
+	return "", fmt.Errorf("project %s has no main branch in /api/project_branches/list", project)
 }
 
 // maxIssuePages caps pagination (SonarQube refuses results past 10 000).
@@ -170,9 +188,6 @@ func (r *Runner) ListIssues(ctx context.Context, o ListIssuesOptions, limit int)
 			det = ParseDetected(stderr)
 			if o.Project == "" && det.Project != "" {
 				o.Project = det.Project
-			}
-			if o.PullRequest == "" && o.Branch == "" && det.PullRequest != "" {
-				o.PullRequest = det.PullRequest
 			}
 		}
 		var resp IssuesSearchResponse

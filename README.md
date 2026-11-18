@@ -177,6 +177,14 @@ Every command takes `--format toon|json|md|table`. The default is `table`
 when stdout is a terminal and [TOON](https://github.com/toon-format/toon) (compact,
 token-efficient) when piped, which is what agents see.
 
+### Scope: main branch by default
+
+Without `--branch` or `--pr`, every command reads the project's **main
+branch** in SonarQube. `sqa` never guesses a branch or pull request from your
+local git checkout (plain `sonar list issues` would pick a PR whose branch
+matches the one you have checked out); it passes the main branch to `sonar`
+explicitly. Pass `--branch`/`--pr` to look at a specific analysed branch or PR.
+
 ### Ranking
 
 1. Vulnerabilities (MQR software quality `SECURITY`, or type `VULNERABILITY`)

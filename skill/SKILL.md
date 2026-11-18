@@ -55,7 +55,7 @@ Read-only, run freely:
 | `sqa pr-body <key>... \| --from-findings [filters] [--reason TEXT]` | Markdown "Resolves SonarQube findings" block for a PR body, one line per finding (message linked to SonarQube, rule, location, key). |
 | `sqa coverage --file <file>` | That file's uncovered line ranges and partly covered conditions (`--file <dir>` ranks the files below it). |
 
-All three look up open fix PRs once per run through `gh` (or, without it,
+`findings`, `next` and `show` look up open fix PRs once per run through `gh` (or, without it,
 remote `sonar/*` branches via `git ls-remote`). `pr_check` says which was used;
 if it is `unavailable`, nothing was skipped and the `note` says why. Then
 check the forge yourself before opening a PR. `--no-pr-check` turns the lookup
@@ -77,6 +77,12 @@ or the login first.
 
 If `sqa findings` cannot determine the project, ask the user for the project
 key and pass `--project <key>`.
+
+**Scope:** without `--branch`/`--pr`, every command reads the project's
+**main branch** in SonarQube, never a branch or PR guessed from the local git
+checkout. That is what the fix loop needs, since fixes branch from the default
+branch. Use `--branch`/`--pr` only when the user asks about a specific
+analysed branch or pull request.
 
 Add `--dry-run` to preview a state change. Output defaults to the compact
 TOON format when piped; add `--format json` if you need JSON.

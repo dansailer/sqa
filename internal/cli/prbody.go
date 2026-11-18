@@ -163,9 +163,6 @@ Read-only. Prints Markdown unless --format is given.`,
 					return err
 				}
 				res.Project = g.Project
-				if pb.pr == "" && pb.branch == "" {
-					pb.pr = g.PullRequest
-				}
 				for _, f := range g.Findings {
 					res.Findings = append(res.Findings, pb.fromFinding(f, g.Project))
 				}
