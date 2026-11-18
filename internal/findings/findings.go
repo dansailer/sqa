@@ -226,6 +226,7 @@ func Rank(fs []Finding) {
 type Filter struct {
 	MinSeverity  Severity
 	SecurityOnly bool
+	Path         func(string) bool // nil = any path
 }
 
 // Apply returns the findings matching the filter.
@@ -236,6 +237,9 @@ func (f Filter) Apply(in []Finding) []Finding {
 			continue
 		}
 		if x.Severity < f.MinSeverity {
+			continue
+		}
+		if f.Path != nil && !f.Path(x.File) {
 			continue
 		}
 		out = append(out, x)

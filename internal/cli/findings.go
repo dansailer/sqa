@@ -28,7 +28,7 @@ func (s *scopeFlags) register(cmd *cobra.Command) {
 	f.StringVarP(&s.project, "project", "p", "", "project key (default: default_project from config, else sonar auto-detection)")
 	f.StringVar(&s.branch, "branch", "", "branch name")
 	f.StringVar(&s.pr, "pr", "", "pull request id")
-	f.StringVar(&s.file, "file", "", "limit to one file (or a directory's own files), path from project root")
+	f.StringVar(&s.file, "file", "", "limit to one file (or a directory's own files), path from project root; or a glob such as 'test/**' or '**/*_test.go'")
 	f.BoolVar(&s.newCode, "new-code", false, "only findings on new code")
 	f.StringVar(&s.minSeverity, "min-severity", "", "minimum severity: BLOCKER, HIGH|CRITICAL, MEDIUM|MAJOR, LOW|MINOR, INFO")
 	f.BoolVar(&s.securityOnly, "security-only", false, "only vulnerabilities and security hotspots")
@@ -194,7 +194,18 @@ func (a *app) gather(ctx context.Context, r *sonarcli.Runner, s scopeFlags) (Fin
 	if project == "" {
 		project = a.cfg.DefaultProject
 	}
-	opts := sonarcli.ListIssuesOptions{Project: project, Branch: s.branch, PullRequest: s.pr, File: s.file, NewCode: s.newCode}
+	// A glob is matched by sqa on the full list; a plain path goes to the
+	// server (sonar's --file: a file, or a directory's own files).
+	serverFile := s.file
+	var match func(string) bool
+	if findings.IsGlob(s.file) {
+		m, err := findings.CompileGlob(s.file)
+		if err != nil {
+			return res, usageErr("bad --file glob %q: %v", s.file, err)
+		}
+		serverFile, match = "", m
+	}
+	opts := sonarcli.ListIssuesOptions{Project: project, Branch: s.branch, PullRequest: s.pr, File: serverFile, NewCode: s.newCode}
 	issues, comps, det, err := r.ListIssues(ctx, opts, 0)
 	if err != nil {
 		var se *sonarcli.Error
@@ -234,8 +245,8 @@ func (a *app) gather(ctx context.Context, r *sonarcli.Runner, s scopeFlags) (Fin
 	}
 
 	hopts := sonarcli.SearchHotspotsOptions{Project: project, Branch: s.branch, PullRequest: res.PullRequest, NewCode: s.newCode, Status: "TO_REVIEW"}
-	if s.file != "" {
-		hopts.Files = []string{s.file}
+	if serverFile != "" {
+		hopts.Files = []string{serverFile}
 	}
 	hs, hcomps, err := r.SearchHotspots(ctx, hopts, 0)
 	if err != nil {
@@ -272,7 +283,7 @@ func (a *app) gather(ctx context.Context, r *sonarcli.Runner, s scopeFlags) (Fin
 	for _, h := range hs {
 		all = append(all, findings.FromHotspot(h, hcomps, allNew || newHot[h.Key]))
 	}
-	all = findings.Filter{MinSeverity: minSev, SecurityOnly: s.securityOnly}.Apply(all)
+	all = findings.Filter{MinSeverity: minSev, SecurityOnly: s.securityOnly, Path: match}.Apply(all)
 	findings.Rank(all)
 	if all == nil {
 		all = []findings.Finding{}
