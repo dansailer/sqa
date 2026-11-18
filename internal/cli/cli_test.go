@@ -820,8 +820,9 @@ func TestTokenStoreOverrides(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.run("auth", "status")
-	t.Setenv("SONARQUBE_CLI_KEYCHAIN_FILE", "/env/c.json")
-	t.Setenv("SONAR_USER_HOME", "/env/home")
+	envDir := filepath.Join(t.TempDir(), "env")
+	t.Setenv("SONARQUBE_CLI_KEYCHAIN_FILE", filepath.Join(envDir, "c.json"))
+	t.Setenv("SONAR_USER_HOME", filepath.Join(envDir, "home"))
 	e.run("auth", "status")
 	t.Setenv("SONARQUBE_CLI_KEYCHAIN_FILE", "")
 	t.Setenv("SONAR_USER_HOME", "")
@@ -835,7 +836,7 @@ func TestTokenStoreOverrides(t *testing.T) {
 	got := readLines(t, log)
 	want := []string{
 		"auth|" + filepath.Join(dir, "c.json") + "|" + filepath.Join(dir, "sh"),
-		"auth|/env/c.json|/env/home",
+		"auth|" + filepath.Join(envDir, "c.json") + "|" + filepath.Join(envDir, "home"),
 		"auth||" + filepath.Join(e.home, ".local", "share", "sqa", "sonar-home"),
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {

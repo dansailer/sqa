@@ -171,10 +171,11 @@ func (e *Environment) Prepare() error {
 	if e.Store != StoreFile {
 		return nil
 	}
-	if e.CredentialsOrigin != OriginEnv {
-		if err := privateDir(filepath.Dir(e.CredentialsFile), e.CredentialsOrigin == OriginDefault); err != nil {
-			return err
-		}
+	// A missing parent directory is created (0700) wherever the path came
+	// from: sonar does not create it and fails the login with ENOENT. Only
+	// sqa's default directory is tightened when it already exists.
+	if err := privateDir(filepath.Dir(e.CredentialsFile), e.CredentialsOrigin == OriginDefault); err != nil {
+		return err
 	}
 	f, err := os.OpenFile(e.CredentialsFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, CredentialsFileMode) //nolint:gosec // path is sqa's credentials file (config or env)
 	switch {
@@ -187,8 +188,6 @@ func (e *Environment) Prepare() error {
 	case errors.Is(err, fs.ErrExist):
 		_, err := e.Secure()
 		return err
-	case errors.Is(err, fs.ErrNotExist) && e.CredentialsOrigin == OriginEnv:
-		return nil // parent dir is the user's business; sonar reports the error
 	default:
 		return fmt.Errorf("credentials file: %w", err)
 	}

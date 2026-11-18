@@ -89,13 +89,32 @@ func TestPrepareLeavesConfiguredParentAlone(t *testing.T) {
 }
 
 func TestPrepareEnvFileMissingParent(t *testing.T) {
+	// sonar does not create the parent and fails `auth login` with ENOENT.
 	p := filepath.Join(t.TempDir(), "missing", "creds.json")
 	e, _ := ResolveEnvironment(getenv(map[string]string{EnvKeychainFile: p}), defaults(t.TempDir()))
 	if err := e.Prepare(); err != nil {
-		t.Fatalf("missing parent of a user-set file should be left to sonar: %v", err)
+		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Dir(p)); !os.IsNotExist(err) {
-		t.Error("sqa created the parent of a user-set credentials file")
+	if m := mode(t, filepath.Dir(p)); m != 0o700 {
+		t.Errorf("parent dir %04o, want 0700", m)
+	}
+	if m := mode(t, p); m != 0o600 {
+		t.Errorf("file %04o, want 0600", m)
+	}
+}
+
+func TestPrepareEnvFileLeavesExistingParentAlone(t *testing.T) {
+	parent := t.TempDir()
+	if err := os.Chmod(parent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(parent, "creds.json")
+	e, _ := ResolveEnvironment(getenv(map[string]string{EnvKeychainFile: p}), defaults(t.TempDir()))
+	if err := e.Prepare(); err != nil {
+		t.Fatal(err)
+	}
+	if m := mode(t, parent); m != 0o755 {
+		t.Errorf("user's parent dir changed to %04o", m)
 	}
 }
 
