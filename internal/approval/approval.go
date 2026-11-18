@@ -68,7 +68,6 @@ type Entry struct {
 	Kind     string `json:"kind"`
 	Key      string `json:"key"`
 	Action   string `json:"action"`
-	Server   string `json:"server,omitempty"`
 	Comment  string `json:"comment"`
 	DryRun   bool   `json:"dry_run"`
 	Result   string `json:"result"`
