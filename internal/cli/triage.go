@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"context"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -57,12 +59,54 @@ func (c *changeFlags) register(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&c.dryRun, "dry-run", false, "show what would change without calling the server")
 }
 
+// change is one approved state change: what it does and how to do it.
+type change struct {
+	kind, action, apiCall string
+	do                    func(ctx context.Context, r *sonarcli.Runner, comment string) error
+}
+
+// apply checks the approval guardrails, runs ch (unless --dry-run), writes
+// the audit line and prints the result.
+func (a *app) apply(ctx context.Context, key string, c changeFlags, ch change) error {
+	if err := approval.Check(c.approved, c.comment); err != nil {
+		return err
+	}
+	res := ChangeResult{Key: key, Kind: ch.kind, Action: ch.action, APICall: ch.apiCall, Comment: approval.ServerComment(c.comment), DryRun: c.dryRun}
+	entry := approval.NewEntry(res.Kind, res.Key, res.Action, res.Comment)
+	entry.DryRun = res.DryRun
+	var opErr error
+	switch {
+	case res.DryRun:
+		res.Result = "dry-run"
+	default:
+		if r, err := a.runner(); err != nil {
+			opErr = err
+		} else {
+			opErr = ch.do(ctx, r, res.Comment)
+		}
+		res.Result = "ok"
+		if opErr != nil {
+			res.Result, entry.ErrorMsg = "error", opErr.Error()
+		}
+	}
+	entry.Result = res.Result
+	if p, err := a.audit(entry); err != nil {
+		_, _ = fmt.Fprintf(a.stderr, "sqa: warning: could not write audit log: %v\n", err)
+	} else {
+		res.AuditFile = p
+	}
+	if opErr != nil {
+		return opErr
+	}
+	return a.out(res)
+}
+
 func (a *app) audit(e approval.Entry) (string, error) {
 	dir, err := config.StateDir()
 	if err != nil {
 		return "", err
 	}
-	p := dir + "/audit.jsonl"
+	p := filepath.Join(dir, "audit.jsonl")
 	return p, approval.Append(p, e)
 }
 
@@ -78,26 +122,18 @@ func (a *app) markCmd() *cobra.Command {
 			if !ok {
 				return usageErr("unknown verdict %q (use %s)", args[1], verbs(approval.IssueTransitions))
 			}
-			if err := approval.Check(c.approved, c.comment); err != nil {
-				return err
-			}
-			comment := approval.ServerComment(c.comment)
-			res := ChangeResult{Key: key, Kind: "issue", Action: verb, Comment: comment, DryRun: c.dryRun,
-				APICall: "POST /api/issues/do_transition transition=" + transition + " + POST /api/issues/add_comment"}
-			return a.applyChange(cmd, &res, func() error {
-				r, err := a.runner()
-				if err != nil {
-					return err
-				}
-				if err := r.TransitionIssue(cmd.Context(), key, transition); err != nil {
-					return err
-				}
-				if err := r.CommentIssue(cmd.Context(), key, comment); err != nil {
-					// Do not let a retry repeat the transition.
-					return fmt.Errorf("transition %s was applied, but adding the comment failed (add it in SonarQube): %w", transition, err)
-				}
-				return nil
-			})
+			return a.apply(cmd.Context(), key, c, change{kind: "issue", action: verb,
+				apiCall: "POST /api/issues/do_transition transition=" + transition + " + POST /api/issues/add_comment",
+				do: func(ctx context.Context, r *sonarcli.Runner, comment string) error {
+					if err := r.TransitionIssue(ctx, key, transition); err != nil {
+						return err
+					}
+					if err := r.CommentIssue(ctx, key, comment); err != nil {
+						// Do not let a retry repeat the transition.
+						return fmt.Errorf("transition %s was applied, but adding the comment failed (add it in SonarQube): %w", transition, err)
+					}
+					return nil
+				}})
 		},
 	}
 	c.register(cmd)
@@ -107,6 +143,45 @@ func (a *app) markCmd() *cobra.Command {
 // hotspotVerbs lists every `sqa hotspot` action for help and errors.
 func hotspotVerbs() string {
 	return verbs(approval.HotspotResolutions) + "|reopen|comment|assign <login>"
+}
+
+// hotspotChange maps `sqa hotspot <key> <verb> [login]` to a change.
+func hotspotChange(key string, args []string) (change, error) {
+	verb := strings.ToLower(args[0])
+	ch := change{kind: "hotspot", action: verb}
+	switch {
+	case verb == "assign":
+		if len(args) != 2 || strings.TrimSpace(args[1]) == "" {
+			return ch, usageErr("assign needs a login: sqa hotspot <key> assign <login>")
+		}
+		login := strings.TrimSpace(args[1])
+		ch.action, ch.apiCall = "assign "+login, "POST /api/hotspots/assign assignee="+login
+		ch.do = func(ctx context.Context, r *sonarcli.Runner, comment string) error {
+			return r.AssignHotspot(ctx, key, login, comment)
+		}
+	case len(args) == 2:
+		return ch, usageErr("only assign takes a third argument")
+	case verb == "reopen":
+		ch.apiCall = "POST /api/hotspots/change_status status=TO_REVIEW"
+		ch.do = func(ctx context.Context, r *sonarcli.Runner, comment string) error {
+			return r.ReopenHotspot(ctx, key, comment)
+		}
+	case verb == "comment":
+		ch.apiCall = "POST /api/hotspots/add_comment"
+		ch.do = func(ctx context.Context, r *sonarcli.Runner, comment string) error {
+			return r.CommentHotspot(ctx, key, comment)
+		}
+	default:
+		resolution, ok := approval.HotspotResolutions[verb]
+		if !ok {
+			return ch, usageErr("unknown action %q (use %s)", args[0], hotspotVerbs())
+		}
+		ch.apiCall = "POST /api/hotspots/change_status status=REVIEWED resolution=" + resolution
+		ch.do = func(ctx context.Context, r *sonarcli.Runner, comment string) error {
+			return r.ReviewHotspot(ctx, key, resolution, comment)
+		}
+	}
+	return ch, nil
 }
 
 func (a *app) hotspotCmd() *cobra.Command {
@@ -125,71 +200,13 @@ Every action needs --approved-by-user and a --comment (posted with an [sqa]
 prefix), supports --dry-run and is written to the audit log.`,
 		Args: cobra.RangeArgs(2, 3),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			key, verb := args[0], strings.ToLower(args[1])
-			var res ChangeResult
-			var do func(r *sonarcli.Runner) error
-			switch {
-			case verb == "assign":
-				if len(args) != 3 || strings.TrimSpace(args[2]) == "" {
-					return usageErr("assign needs a login: sqa hotspot <key> assign <login>")
-				}
-				login := strings.TrimSpace(args[2])
-				res = ChangeResult{Action: "assign " + login, APICall: "POST /api/hotspots/assign assignee=" + login}
-				do = func(r *sonarcli.Runner) error { return r.AssignHotspot(cmd.Context(), key, login, res.Comment) }
-			case len(args) == 3:
-				return usageErr("only assign takes a third argument")
-			case verb == "reopen":
-				res = ChangeResult{Action: verb, APICall: "POST /api/hotspots/change_status status=TO_REVIEW"}
-				do = func(r *sonarcli.Runner) error { return r.ReopenHotspot(cmd.Context(), key, res.Comment) }
-			case verb == "comment":
-				res = ChangeResult{Action: verb, APICall: "POST /api/hotspots/add_comment"}
-				do = func(r *sonarcli.Runner) error { return r.CommentHotspot(cmd.Context(), key, res.Comment) }
-			default:
-				resolution, ok := approval.HotspotResolutions[verb]
-				if !ok {
-					return usageErr("unknown action %q (use %s)", args[1], hotspotVerbs())
-				}
-				res = ChangeResult{Action: verb, APICall: "POST /api/hotspots/change_status status=REVIEWED resolution=" + resolution}
-				do = func(r *sonarcli.Runner) error { return r.ReviewHotspot(cmd.Context(), key, resolution, res.Comment) }
-			}
-			if err := approval.Check(c.approved, c.comment); err != nil {
+			ch, err := hotspotChange(args[0], args[1:])
+			if err != nil {
 				return err
 			}
-			res.Key, res.Kind, res.Comment, res.DryRun = key, "hotspot", approval.ServerComment(c.comment), c.dryRun
-			return a.applyChange(cmd, &res, func() error {
-				r, err := a.runner()
-				if err != nil {
-					return err
-				}
-				return do(r)
-			})
+			return a.apply(cmd.Context(), args[0], c, ch)
 		},
 	}
 	c.register(cmd)
 	return cmd
-}
-
-func (a *app) applyChange(_ *cobra.Command, res *ChangeResult, do func() error) error {
-	entry := approval.NewEntry(res.Kind, res.Key, res.Action, res.Comment)
-	entry.DryRun = res.DryRun
-	var opErr error
-	if res.DryRun {
-		res.Result = "dry-run"
-	} else if opErr = do(); opErr != nil {
-		res.Result = "error"
-		entry.ErrorMsg = opErr.Error()
-	} else {
-		res.Result = "ok"
-	}
-	entry.Result = res.Result
-	p, err := a.audit(entry)
-	if err != nil {
-		_, _ = fmt.Fprintf(a.stderr, "sqa: warning: could not write audit log: %v\n", err)
-	} else {
-		res.AuditFile = p
-	}
-	if opErr != nil {
-		return opErr
-	}
-	return a.out(*res)
 }
