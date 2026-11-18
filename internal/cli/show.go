@@ -219,7 +219,7 @@ func loadBrief(ctx context.Context, r *sonarcli.Runner, key string, contextLines
 	}
 	if issue != nil {
 		f := findings.FromIssue(*issue, comps, false)
-		b = Brief{Key: key, Kind: string(f.Kind), Category: f.Category, Severity: f.SeverityStr, Quality: f.Quality,
+		b = Brief{Key: key, Kind: string(f.Kind), Category: f.Category, Severity: f.Severity.String(), Quality: f.Quality,
 			Status: f.Status, Rule: issue.Rule, File: f.File, Line: f.Line, Message: issue.Message,
 			Flows: flowSteps(issue.Flows, comps), Verdicts: []string{"fix", "fp", "accept"}}
 		component, tr, project = issue.Component, issue.TextRange, issue.Project
@@ -227,7 +227,7 @@ func loadBrief(ctx context.Context, r *sonarcli.Runner, key string, contextLines
 		b.Why, b.Assess, b.HowToFix = ruleSections(rule, issue.RuleDescriptionCtx)
 	} else {
 		f := findings.FromHotspot(h.AsHotspot(), comps, false)
-		b = Brief{Key: key, Kind: string(f.Kind), Category: f.Category, Severity: f.SeverityStr, Quality: f.Quality,
+		b = Brief{Key: key, Kind: string(f.Kind), Category: f.Category, Severity: f.Severity.String(), Quality: f.Quality,
 			Status: f.Status, Rule: h.Rule.Key, RuleName: h.Rule.Name, File: f.File, Line: f.Line, Message: h.Message,
 			Flows: flowSteps(h.Flows, comps), Verdicts: []string{"fix (then mark fixed)", "safe", "acknowledged"}}
 		if h.Resolution != "" {

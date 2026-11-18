@@ -1,6 +1,10 @@
 package findings
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
 
 func TestCompileGlob(t *testing.T) {
 	cases := []struct {
@@ -33,5 +37,19 @@ func TestCompileGlob(t *testing.T) {
 	}
 	if !IsGlob("test/**") || IsGlob("internal/api/users.go") {
 		t.Error("IsGlob")
+	}
+}
+
+func TestSeverityJSONIsTheName(t *testing.T) {
+	b, err := json.Marshal(Finding{Key: "k", Severity: SevHigh})
+	if err != nil || !strings.Contains(string(b), `"severity":"HIGH"`) {
+		t.Fatalf("%s %v", b, err)
+	}
+	var f Finding
+	if err := json.Unmarshal(b, &f); err != nil || f.Severity != SevHigh {
+		t.Fatalf("%+v %v", f, err)
+	}
+	if err := json.Unmarshal([]byte(`{"severity":"UNKNOWN"}`), &f); err != nil || f.Severity != SevUnknown {
+		t.Fatalf("%+v %v", f, err)
 	}
 }

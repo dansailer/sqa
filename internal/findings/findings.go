@@ -93,6 +93,15 @@ func ParseSeverity(s string) (Severity, error) {
 	return SevUnknown, fmt.Errorf("unknown severity %q (use BLOCKER, HIGH|CRITICAL, MEDIUM|MAJOR, LOW|MINOR, INFO)", s)
 }
 
+// MarshalText writes the severity name, e.g. "HIGH".
+func (s Severity) MarshalText() ([]byte, error) { return []byte(s.String()), nil }
+
+// UnmarshalText reads a severity name; unknown names become SevUnknown.
+func (s *Severity) UnmarshalText(b []byte) error {
+	*s = sev(string(b))
+	return nil
+}
+
 func sev(s string) Severity {
 	v, _ := ParseSeverity(s)
 	return v
@@ -100,20 +109,19 @@ func sev(s string) Severity {
 
 // Finding is the normalised view of an issue or hotspot.
 type Finding struct {
-	Rank        int      `json:"rank"`
-	Key         string   `json:"key"`
-	Kind        Kind     `json:"kind"`
-	Tier        Tier     `json:"tier"`
-	Category    string   `json:"category"`
-	Quality     string   `json:"quality"`
-	Severity    Severity `json:"-"`
-	SeverityStr string   `json:"severity"`
-	Rule        string   `json:"rule"`
-	File        string   `json:"file"`
-	Line        int      `json:"line"`
-	NewCode     bool     `json:"new_code"`
-	Status      string   `json:"status"`
-	Message     string   `json:"message"`
+	Rank     int      `json:"rank"`
+	Key      string   `json:"key"`
+	Kind     Kind     `json:"kind"`
+	Tier     Tier     `json:"tier"`
+	Category string   `json:"category"`
+	Quality  string   `json:"quality"`
+	Severity Severity `json:"severity"`
+	Rule     string   `json:"rule"`
+	File     string   `json:"file"`
+	Line     int      `json:"line"`
+	NewCode  bool     `json:"new_code"`
+	Status   string   `json:"status"`
+	Message  string   `json:"message"`
 	// PR is the open fix PR (URL) or `branch:<name>` (remote fix branch,
 	// git fallback); empty when none was found or the check was off.
 	PR string `json:"pr"`
@@ -170,7 +178,6 @@ func FromIssue(i sonarcli.Issue, comps []sonarcli.Component, newCode bool) Findi
 		f.Severity = sev(i.Severity)
 	}
 	f.Category = f.Tier.Label()
-	f.SeverityStr = f.Severity.String()
 	return f
 }
 
@@ -189,7 +196,6 @@ func FromHotspot(h sonarcli.Hotspot, comps []sonarcli.Component, newCode bool) F
 		f.Line = h.TextRange.StartLine
 	}
 	f.Category = f.Tier.Label()
-	f.SeverityStr = f.Severity.String()
 	return f
 }
 

@@ -74,7 +74,7 @@ func (r FindingsResult) Markdown() string {
 	}
 	b.WriteString("| # | category | severity | status | key | rule | location | new | PR | message |\n|---|---|---|---|---|---|---|---|---|---|\n")
 	for _, f := range r.Findings {
-		fmt.Fprintf(&b, "| %d | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n", f.Rank, f.Category, f.SeverityStr, f.Status, f.Key, f.Rule,
+		fmt.Fprintf(&b, "| %d | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n", f.Rank, f.Category, f.Severity, f.Status, f.Key, f.Rule,
 			output.MDEscape(loc(f)), yesNo(f.NewCode), output.MDEscape(f.PR), output.MDEscape(f.Message))
 	}
 	return b.String()
@@ -94,7 +94,7 @@ func (r FindingsResult) Table() string {
 	b.WriteString("\n")
 	fmt.Fprintf(&b, "%-4s %-15s %-8s %-12s %-3s %-22s %-40s %-8s %s\n", "#", "CATEGORY", "SEVERITY", "STATUS", "NEW", "KEY", "LOCATION", "PR", "MESSAGE")
 	for _, f := range r.Findings {
-		fmt.Fprintf(&b, "%-4d %-15s %-8s %-12s %-3s %-22s %-40s %-8s %s\n", f.Rank, f.Category, f.SeverityStr, shortStatus(f.Status), yesNo(f.NewCode), f.Key, clip(loc(f), 40),
+		fmt.Fprintf(&b, "%-4d %-15s %-8s %-12s %-3s %-22s %-40s %-8s %s\n", f.Rank, f.Category, f.Severity, shortStatus(f.Status), yesNo(f.NewCode), f.Key, clip(loc(f), 40),
 			shortPR(f.PR), clip(f.Message, 90))
 	}
 	return b.String()
