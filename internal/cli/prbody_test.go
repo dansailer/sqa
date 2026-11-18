@@ -137,3 +137,18 @@ func TestGroupedPRBodyCoversEveryListedFinding(t *testing.T) {
 		}
 	}
 }
+
+func TestPRBodyHasNoPRCheckFlag(t *testing.T) {
+	e := newEnv(t)
+	code, _, stderr := e.run("pr-body", "AX-VULN", "--no-pr-check")
+	if code != ExitUsage || !strings.Contains(stderr, "unknown flag: --no-pr-check") {
+		t.Errorf("pr-body never looks up PRs, so --no-pr-check must not exist: exit %d %s", code, stderr)
+	}
+	// --from-findings never asks the forge either.
+	if code, _, _ := e.run("pr-body", "--from-findings", "--file", "internal/api/**"); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if b, err := os.ReadFile(os.Getenv("FAKE_FORGE_LOG")); err == nil && len(b) > 0 {
+		t.Errorf("pr-body ran the forge: %s", b)
+	}
+}

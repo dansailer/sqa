@@ -298,6 +298,6 @@ func (a *app) showCmd() *cobra.Command {
 	cmd.Flags().StringVar(&branch, "branch", "", "branch (for code context)")
 	cmd.Flags().StringVar(&pr, "pr", "", "pull request id (for code context)")
 	cmd.Flags().IntVar(&contextLines, "context", defaultContextLines, "lines of code context around the finding")
-	cmd.Flags().BoolVar(&noPRCheck, "no-pr-check", false, "do not look for an open fix PR on the forge (gh / git ls-remote)")
+	registerNoPRCheck(cmd, &noPRCheck)
 	return cmd
 }

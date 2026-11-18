@@ -19,7 +19,6 @@ type scopeFlags struct {
 	newCode                   bool
 	minSeverity               string
 	securityOnly              bool
-	noPRCheck                 bool
 	noAcknowledged            bool
 }
 
@@ -33,7 +32,12 @@ func (s *scopeFlags) register(cmd *cobra.Command) {
 	f.StringVar(&s.minSeverity, "min-severity", "", "minimum severity: BLOCKER, HIGH|CRITICAL, MEDIUM|MAJOR, LOW|MINOR, INFO")
 	f.BoolVar(&s.securityOnly, "security-only", false, "only vulnerabilities and security hotspots")
 	f.BoolVar(&s.noAcknowledged, "no-acknowledged", false, "hide hotspots reviewed as ACKNOWLEDGED (fix pending); shown by default")
-	f.BoolVar(&s.noPRCheck, "no-pr-check", false, "do not look for open fix PRs on the forge (gh / git ls-remote)")
+}
+
+// registerNoPRCheck adds --no-pr-check to the commands that look up open fix
+// PRs (findings, next, show).
+func registerNoPRCheck(cmd *cobra.Command, off *bool) {
+	cmd.Flags().BoolVar(off, "no-pr-check", false, "do not look for open fix PRs on the forge (gh / git ls-remote)")
 }
 
 // FindingsResult is the output of `sqa findings`.
@@ -177,6 +181,7 @@ func clip(s string, n int) string {
 }
 
 // gather collects issues and to-review hotspots, normalises and ranks them.
+// It only talks to SonarQube; markOpenPRs adds the forge lookup.
 func (a *app) gather(ctx context.Context, r *sonarcli.Runner, s scopeFlags) (FindingsResult, error) {
 	res := FindingsResult{Branch: s.branch, PullRequest: s.pr}
 	if s.branch != "" && s.pr != "" {
@@ -288,25 +293,31 @@ func (a *app) gather(ctx context.Context, r *sonarcli.Runner, s scopeFlags) (Fin
 	if all == nil {
 		all = []findings.Finding{}
 	}
-	if len(all) > 0 || s.noPRCheck {
-		ix, check := prIndex(ctx, s.noPRCheck)
-		res.PRCheck, res.Note = check, ix.Note
-		for i := range all {
-			if p, ok := ix.Lookup(all[i].Key); ok {
-				all[i].PR = p.Ref()
-			}
-		}
-	} else {
-		res.PRCheck = "none"
-	}
 	res.Findings = all
 	res.Total = len(all)
 	res.Shown = len(all)
 	return res, nil
 }
 
+// markOpenPRs looks up open fix PRs once (unless off) and sets each
+// finding's PR, plus PRCheck and Note on res.
+func markOpenPRs(ctx context.Context, res *FindingsResult, off bool) {
+	if len(res.Findings) == 0 && !off {
+		res.PRCheck = "none"
+		return
+	}
+	ix, check := prIndex(ctx, off)
+	res.PRCheck, res.Note = check, ix.Note
+	for i := range res.Findings {
+		if p, ok := ix.Lookup(res.Findings[i].Key); ok {
+			res.Findings[i].PR = p.Ref()
+		}
+	}
+}
+
 func (a *app) findingsCmd() *cobra.Command {
 	var s scopeFlags
+	var noPRCheck bool
 	var limit int
 	var failOn string
 	var noSummary bool
@@ -340,6 +351,7 @@ then by severity, new code first, file and line.`,
 			if err != nil {
 				return err
 			}
+			markOpenPRs(cmd.Context(), &res, noPRCheck)
 			if limit > 0 && len(res.Findings) > limit {
 				res.Findings = res.Findings[:limit]
 				res.Shown = limit
@@ -357,6 +369,7 @@ then by severity, new code first, file and line.`,
 		},
 	}
 	s.register(cmd)
+	registerNoPRCheck(cmd, &noPRCheck)
 	cmd.Flags().IntVar(&limit, "limit", 50, "maximum findings to show (0 = all)")
 	cmd.Flags().StringVar(&failOn, "fail-on", "", "exit 1 if any shown finding has at least this severity")
 	cmd.Flags().BoolVar(&noSummary, "no-summary", false, "skip the quality gate summary (coverage, hotspots reviewed) at the end")
@@ -449,6 +462,7 @@ func pickNext(fs []findings.Finding, skip map[string]bool, includeOpenPR bool) (
 
 func (a *app) nextCmd() *cobra.Command {
 	var s scopeFlags
+	var noPRCheck bool
 	var skip []string
 	var includeOpenPR bool
 	cmd := &cobra.Command{
@@ -473,6 +487,7 @@ the lookup off, --skip <key> passes over a finding by hand (repeatable).`,
 			if err != nil {
 				return err
 			}
+			markOpenPRs(ctx, &res, noPRCheck)
 			skipSet := map[string]bool{}
 			for _, k := range skip {
 				if k = strings.TrimSpace(k); k != "" {
@@ -501,6 +516,7 @@ the lookup off, --skip <key> passes over a finding by hand (repeatable).`,
 		},
 	}
 	s.register(cmd)
+	registerNoPRCheck(cmd, &noPRCheck)
 	cmd.Flags().StringSliceVar(&skip, "skip", nil, "finding key to pass over (repeatable or comma-separated)")
 	cmd.Flags().BoolVar(&includeOpenPR, "include-open-pr", false, "do not skip findings that already have an open fix PR")
 	return cmd

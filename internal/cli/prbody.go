@@ -158,7 +158,6 @@ Read-only. Prints Markdown unless --format is given.`,
 			}
 			res := PRBody{Reason: strings.TrimSpace(reason), Findings: []PRBodyItem{}}
 			if fromFindings {
-				s.noPRCheck = true
 				g, err := a.gather(ctx, r, s)
 				if err != nil {
 					return err
